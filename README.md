@@ -1,4 +1,4 @@
-# <Interactive Concept Bottleneck Generative Models>
+# Interactive Concept Bottleneck Generative Models
 
 ## Description
 Interactive Concept Bottleneck Generative Models aims to enhance interpretability and user interaction within the domain of generative AI. 
