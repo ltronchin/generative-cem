@@ -47,10 +47,13 @@ def train_model(model, data_loaders, learning_rate, weights, num_epochs, early_s
             param.requires_grad = False
 
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-    criterion_c = nn.MSELoss()
+    criterion_c = nn.MSELoss()      # Loss dei concetti
     criterion_y = nn.CrossEntropyLoss()
-    criterion_rec = nn.MSELoss()
-    criterion_lat = nn.MSELoss()
+    criterion_rec = nn.MSELoss()     # Loss generation
+    criterion_lat = nn.MSELoss()    
+    
+    # TO DO: Loss ortogonalità di tutti i concetti sai supervised che unsupervised. 
+    # Orthogonalità dei concetti supervised e unsupervised ma non tra tutti. 
 
     best_model_wts = copy.deepcopy(model.state_dict())
     best_loss = np.Inf
@@ -333,3 +336,31 @@ def plot_reconstructions(plot_training_dir, model, data_loader, device, num_imag
 
     x_out = Image.fromarray(x_out[:, :, 0])
     x_out.save(os.path.join(plot_training_dir, "img_rec.pdf"), resolution=400)
+    
+############################### RICCARDO ########################
+def compute_gram_matrix(W):
+    """Compute the Gram matrix of neuron weights W."""
+    return np.dot(W.T, W)
+
+def orthogonality_loss_gram(W):
+    """Compute the orthogonality loss using Gram matrix approach with frobenius distance"""
+    G = compute_gram_matrix(W)
+    identity = np.eye(W.shape[1])  # Identity matrix of size X (number of neurons)
+    return np.linalg.norm(G - identity, 'fro')**2  # Frobenius norm of (G - I)^2
+
+def mmd_loss(W, target_distribution):
+    # Target distribution ca be created exploiting random orthogonal vectors like this: q, _ = np.linalg.qr(vectors) (Orthonormal upper-triangular)
+    """Compute the Maximal Mean Discrepancy (MMD) loss."""
+    phi_W = np.mean(W, axis=0)  # Feature map for neuron weights
+    phi_V = np.mean(target_distribution, axis=0)  # Feature map for target distribution
+    return np.linalg.norm(phi_W - phi_V)**2
+
+def cosine_similarity_loss(W):
+    """Compute the cosine similarity loss."""
+    X = W.shape[1]  # Number of neurons
+    similarity_sum = 0.0
+    for i in range(X - 1):
+        for j in range(i + 1, X):
+            similarity = np.dot(W[:, i], W[:, j]) / (np.linalg.norm(W[:, i]) * np.linalg.norm(W[:, j]))
+            similarity_sum += similarity
+    return -similarity_sum / (X * (X - 1) / 2)

@@ -19,7 +19,8 @@ column_width_inches = column_width_pt * pt_to_inch
 aspect_ratio = 4 / 3
 sns.set(style="whitegrid", font_scale=1.6, rc={"figure.figsize": (column_width_inches, column_width_inches / aspect_ratio)})
 
-
+# Funzione che seleziona il modello in base all'esperimento
+# TO DO: Another end-to-end col blocco unsupervised
 def select_model(exp_name, input_size, num_concepts, num_classes):
 
     if exp_name == 'independent_concept':
@@ -49,10 +50,13 @@ class MLP(nn.Module):
         output = self.classifier(concepts)
         return output
 
+# TO DO: insert number of unsupervised concept to be learned automatically:
+# - Lasciarli completemente liberi
+# - Loss di indipendenza tra i neuroni (perpendicolarità)
 class Encoder(nn.Module):
     def __init__(self, input_size, num_concepts, feature_sizes=(16, 32, 64, 128)):
         super(Encoder, self).__init__()
-
+        
         self.input_size = input_size
         self.conv_layers = nn.ModuleList()
         self.feature_sizes = feature_sizes
