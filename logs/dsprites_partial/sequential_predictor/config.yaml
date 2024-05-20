@@ -1,0 +1,30 @@
+DATA:
+  data_dir: ./data/dsprites/interim/partial
+  dataset_name: dsprites_partial
+  file_name: dsprites_leakage
+  file_type: npz
+  img_size: 64
+  n_channels: 1
+  n_classes: 2
+  n_concepts: 3
+  n_model_concepts: 2
+MODEL:
+  freeze_encoder: true
+  pretrained_model_path: ./models/dsprites_partial/oracle/model_best.pt
+REPORTS:
+  logs_dir: ./logs/
+  models_dir: ./models/
+  reports_dir: ./reports/
+TRAINING:
+  batch_size: 64
+  early_stopping: 10
+  learning_rate: 0.0001
+  num_epochs: 50
+  warmup_epochs: 5
+  weight_concept_loss: 0.0
+  weight_lat_loss: 0.0
+  weight_rec_loss: 0.0
+  weight_task_loss: 1.0
+device: cuda:1
+exp_name: sequential_predictor
+seed: 42

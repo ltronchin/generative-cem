@@ -42,10 +42,11 @@ def parse_args():
 
 if __name__ == "__main__":
 
-    args = parse_args()
+    # args = parse_args()
 
+    cfg_file = '/home/riccardo/Github/generative-cem/configs/sequential.yaml'
     # Load JSON file. from the disk.
-    with open(args.cfg_file) as file:
+    with open(cfg_file) as file:
         cfg = yaml.load(file, Loader=yaml.FullLoader)
 
     exp_name = cfg['exp_name']
@@ -62,6 +63,7 @@ if __name__ == "__main__":
     n_channels = cfg_data['n_channels']
     n_classes = cfg_data['n_classes']
     n_concepts = cfg_data['n_concepts']
+    n_model_concepts = cfg_data['n_model_concepts']
 
     # Directories.
     cfg_dir = cfg['REPORTS']
@@ -116,12 +118,15 @@ if __name__ == "__main__":
     assert img_size == sample['image'].shape[2], "The image size in the dataset is different from the one specified in the arguments."
     assert n_concepts ==  sample['concepts'].shape[1], "The number of concepts in the dataset is different from the one specified in the arguments."
 
-    model = models.select_model(exp_name=exp_name, input_size=(n_channels, img_size, img_size), num_concepts=n_concepts, num_classes=n_classes)
+    from src.models.models import select_model, Encoder, MLP, IndependentMLP, Decoder, End2End
+    # model = models.select_model....
+    model = select_model(exp_name=exp_name, input_size=(n_channels, img_size, img_size), num_concepts=n_concepts, \
+                                num_classes=n_classes, num_model_concepts=n_model_concepts)
 
-    if pretrained_model_path is not None:
-        model.load_state_dict(torch.load(pretrained_model_path))
+    # if pretrained_model_path is not None:
+    #     model.load_state_dict(torch.load(pretrained_model_path))
 
-    # Train.
+    # Train - Paul Kalkbrenner
     device = torch.device(device_name if torch.cuda.is_available() else "cpu")
     model = model.to(device)
 

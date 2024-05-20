@@ -1,3 +1,4 @@
+#%%
 from tqdm import trange
 import torch
 import os
@@ -16,6 +17,7 @@ import torch.nn.functional as F
 # Figure properties.
 import seaborn as sns
 import matplotlib.pyplot as plt
+#%%
 column_width_pt = 516.0
 pt_to_inch = 1 / 72.27
 column_width_inches = column_width_pt * pt_to_inch
@@ -101,8 +103,8 @@ def train_model(model, data_loaders, learning_rate, weights, num_epochs, early_s
 
                 # forward
                 with torch.set_grad_enabled(phase == 'train'):
-
-                    preds_concepts, preds_task, preds_img_tilde, preds_concepts_tilde = model(imgs)
+                    # print(imgs.size())
+                    preds_concepts, unsup_concepts, preds_task, preds_img_tilde, preds_concepts_tilde = model(imgs)
                     _, preds = torch.max(preds_task, 1)
 
                     loss = torch.tensor(0.0).to(device)

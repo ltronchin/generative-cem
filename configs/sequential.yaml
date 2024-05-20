@@ -4,18 +4,23 @@ device: cuda:1
 
 DATA:
   dataset_name: dsprites_partial
-  data_dir: ./data/dsprites/interim/partial
+  data_dir: /home/lorenzo/generative-cem/data/dsprites/interim/partial
   file_name: dsprites_leakage
   file_type: npz
   n_channels: 1
   img_size: 64
   n_classes: 2
   n_concepts: 3
+  n_model_concepts: 2
 
+# REPORTS:
+#   models_dir: ./models/
+#   logs_dir: ./logs/
+#   reports_dir: ./reports/
 REPORTS:
-  models_dir: ./models/
-  logs_dir: ./logs/
-  reports_dir: ./reports/
+  models_dir: /home/riccardo/Github/models/
+  logs_dir: /home/riccardo/Github/logs/
+  reports_dir: /home/riccardo/Github/reports/
 
 MODEL:
   freeze_encoder: True
