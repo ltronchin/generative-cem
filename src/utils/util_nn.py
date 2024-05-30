@@ -96,6 +96,7 @@ def train_model(model, data_loaders, learning_rate, weights, num_epochs, early_s
             running_rec_loss = 0.0
             running_lat_loss = 0.0
             running_loss = 0.0
+            running_sup_unsup_dist = 0.0
 
             # Iterate over data.
             for sample in tqdm(data_loaders[phase]):

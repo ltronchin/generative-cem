@@ -63,6 +63,7 @@ if __name__ == "__main__":
     n_channels = cfg_data['n_channels']
     n_classes = cfg_data['n_classes']
     n_concepts = cfg_data['n_concepts']
+    n_embed_concepts = cfg_data['n_embed_concepts']
     n_model_concepts = cfg_data['n_model_concepts']
 
     # Directories.
@@ -121,7 +122,7 @@ if __name__ == "__main__":
     from src.models.models import select_model, Encoder, MLP, IndependentMLP, Decoder, End2End
     # model = models.select_model....
     model = select_model(exp_name=exp_name, input_size=(n_channels, img_size, img_size), num_concepts=n_concepts, \
-                                num_classes=n_classes, num_model_concepts=n_model_concepts)
+                                num_embed_for_concept=n_embed_concepts, num_model_concepts=n_model_concepts, num_classes=n_classes)
 
     # if pretrained_model_path is not None:
     #     model.load_state_dict(torch.load(pretrained_model_path))

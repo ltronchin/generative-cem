@@ -21,7 +21,7 @@ sns.set(style="whitegrid", font_scale=1.6, rc={"figure.figsize": (column_width_i
 
 # Funzione che seleziona il modello in base all'esperimento
 # TO DO: Another end-to-end col blocco unsupervised
-def select_model(exp_name, input_size, num_concepts, num_model_concepts, num_classes):
+def select_model(exp_name, input_size, num_concepts, num_embed_for_concept, num_model_concepts, num_classes):
 
     if exp_name == 'independent_concept':
         return Encoder(input_size, num_concepts, num_embed_for_concept=8, num_model_concepts=num_model_concepts)
@@ -30,9 +30,9 @@ def select_model(exp_name, input_size, num_concepts, num_model_concepts, num_cla
     elif exp_name == 'independent_decoder':
         return Decoder(input_size, num_concepts, num_model_concepts=num_model_concepts)
     elif exp_name == 'sequential':
-        return End2End(input_size, num_concepts, num_classes, num_embed_for_concept=8, num_model_concepts=2)
+        return End2End(input_size, num_concepts, num_classes, num_embed_for_concept, num_model_concepts)
     elif exp_name == 'joint':
-        return End2End(input_size, num_concepts, num_classes, num_embed_for_concept=8, num_model_concepts=2)
+        return End2End(input_size, num_concepts, num_classes, num_embed_for_concept, num_model_concepts)
     else:
         raise ValueError("Invalid experiment name.")
 
@@ -197,7 +197,6 @@ class End2End(nn.Module):
         # x_pos -> [..., ....]
         # orientation -> [..., ....]
 
-
         y = self.predictor(c)
 
         x_tilde = self.concept_decoder(c)
@@ -267,7 +266,7 @@ if __name__ == "__main__":
     size = 64
     channels = 1
     concepts = 3
-    model_concepts = 1
+    model_concepts = 3
     classes = 2
 
     test_encoder(size, channels, concepts, num_model_concepts=model_concepts)
