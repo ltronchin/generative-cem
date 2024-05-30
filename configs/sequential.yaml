@@ -11,7 +11,7 @@ DATA:
   img_size: 64
   n_classes: 2
   n_concepts: 3
-  n_model_concepts: 2
+  n_model_concepts: 3
 
 # REPORTS:
 #   models_dir: ./models/

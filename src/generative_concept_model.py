@@ -14,7 +14,7 @@ from torch.utils.data import Dataset
 from torchvision import transforms
 import torch
 import torch.nn as nn
-import torchvision.models as models
+# import torchvision.models as models
 from torch.utils.data import DataLoader
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 import numpy as np
@@ -42,11 +42,11 @@ def parse_args():
 
 if __name__ == "__main__":
 
-    # args = parse_args()
+    args = parse_args()
 
-    cfg_file = '/home/riccardo/Github/generative-cem/configs/sequential.yaml'
+    # cfg_file = '/home/riccardo/Github/generative-cem/configs/sequential.yaml'
     # Load JSON file. from the disk.
-    with open(cfg_file) as file:
+    with open(args.cfg_file) as file:
         cfg = yaml.load(file, Loader=yaml.FullLoader)
 
     exp_name = cfg['exp_name']
@@ -158,7 +158,7 @@ if __name__ == "__main__":
     c_test = util_nn.predict(model, data_loaders['test'], device)
 
     # Save c_train, c_val, c_test dividing the splits.
-    outdir = os.path.join(data_dir, exp_name)
+    outdir = os.path.join('home/riccardo/Github/generative-cem/data/', exp_name)
     util_path.create_dir(outdir)
     np.save(os.path.join(outdir, 'c_train.npy'), c_train)
     np.save(os.path.join(outdir, 'c_val.npy'), c_val)

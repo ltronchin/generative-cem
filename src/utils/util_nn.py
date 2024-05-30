@@ -54,7 +54,7 @@ def train_model(model, data_loaders, learning_rate, weights, num_epochs, early_s
     criterion_rec = nn.MSELoss()     # Loss generation
     criterion_lat = nn.MSELoss()    
     
-    # TO DO: Loss ortogonalità di tutti i concetti sai supervised che unsupervised. 
+    # TODO: Loss ortogonalità di tutti i concetti sia supervised che unsupervised. 
     # Orthogonalità dei concetti supervised e unsupervised ma non tra tutti. 
 
     best_model_wts = copy.deepcopy(model.state_dict())
@@ -66,11 +66,13 @@ def train_model(model, data_loaders, learning_rate, weights, num_epochs, early_s
         'train_rec_loss': [],
         'train_lat_loss': [],
         'train_total_loss': [],
+        'train_dist_sup_unsup': [],
         'val_concept_loss': [],
         'val_task_loss': [],
         'val_rec_loss': [],
         'val_lat_loss': [],
         'val_total_loss': [],
+        'val_dist_sup_unsup': []
     }
 
     epochs_no_improve = 0
@@ -120,7 +122,8 @@ def train_model(model, data_loaders, learning_rate, weights, num_epochs, early_s
 
                     lat_loss = criterion_lat(preds_concepts_tilde, concepts)
                     loss += (weight_lat_loss * lat_loss)
-
+                    
+                    sup_unsup_dist = F.mse_loss(preds_concepts, unsup_concepts)
                     # backward + optimize only if in training phase
                     if phase == 'train':
                         loss.backward()
@@ -132,12 +135,15 @@ def train_model(model, data_loaders, learning_rate, weights, num_epochs, early_s
                 running_rec_loss += rec_loss.item()
                 running_lat_loss += lat_loss.item()
                 running_loss += loss.item()
+                running_sup_unsup_dist += sup_unsup_dist.item()
 
             epoch_task_loss = running_task_loss / len(data_loaders[phase])
             epoch_concept_loss = running_concept_loss / len(data_loaders[phase])
             epoch_rec_loss = running_rec_loss / len(data_loaders[phase])
             epoch_lat_loss = running_lat_loss / len(data_loaders[phase])
             epoch_loss = running_loss / len(data_loaders[phase])
+            # Average distance between supervised and unsupervised (must be equal in number)
+            epoch_sup_unsup_dist = running_sup_unsup_dist / len(data_loaders[phase])
 
             # update history
             if phase == 'train':
@@ -146,12 +152,14 @@ def train_model(model, data_loaders, learning_rate, weights, num_epochs, early_s
                 history['train_rec_loss'].append(epoch_rec_loss)
                 history['train_lat_loss'].append(epoch_lat_loss)
                 history['train_total_loss'].append(epoch_loss)
+                history['train_dist_sup_unsup'].append(epoch_sup_unsup_dist)
             else:
                 history['val_task_loss'].append(epoch_task_loss)
                 history['val_concept_loss'].append(epoch_concept_loss)
                 history['val_rec_loss'].append(epoch_rec_loss)
                 history['val_lat_loss'].append(epoch_lat_loss)
                 history['val_total_loss'].append(epoch_loss)
+                history['val_dist_sup_unsup'].append(epoch_sup_unsup_dist)
 
             print(
                 f"Phase: {phase} - Epoch: {epoch + 1}, "
@@ -217,7 +225,7 @@ def evaluate(model, data_loader, device):
             all_concepts.extend(concepts.cpu().numpy())
 
             # Prediction
-            preds_concepts, preds_task, preds_rec, preds_lat = model(inputs)
+            preds_concepts, unsup_concepts, preds_task, preds_rec, preds_lat = model(inputs)
             _, preds = torch.max(preds_task, 1)
 
             all_preds.extend(preds.cpu().numpy())
@@ -261,7 +269,7 @@ def predict(model, data_loader, device):
         for sample in tqdm(data_loader):
             inputs, _, _ = sample['image'].to(device), sample['concepts'].to(device), sample['label'].to(device)
 
-            preds_concepts, _, _, _ = model(inputs)
+            preds_concepts, _, _, _, _ = model(inputs)
             all_preds_concepts.extend(preds_concepts.cpu().numpy())
 
     all_preds_concepts = np.array(all_preds_concepts)
@@ -321,7 +329,7 @@ def plot_reconstructions(plot_training_dir, model, data_loader, device, num_imag
         for sample in data_loader:
             x = sample['image'].to(device)
             # Assuming the model returns reconstruction in the third position
-            _, _, x_tilde, _ = model(x)
+            _, _, _, x_tilde, _ = model(x)
             break  # Only take the first batch
 
     # To numpy.
@@ -340,29 +348,29 @@ def plot_reconstructions(plot_training_dir, model, data_loader, device, num_imag
     x_out.save(os.path.join(plot_training_dir, "img_rec.pdf"), resolution=400)
     
 ############################### RICCARDO ########################
-def compute_gram_matrix(W):
-    """Compute the Gram matrix of neuron weights W."""
-    return np.dot(W.T, W)
+# def compute_gram_matrix(W):
+#     """Compute the Gram matrix of neuron weights W."""
+#     return np.dot(W.T, W)
 
-def orthogonality_loss_gram(W):
-    """Compute the orthogonality loss using Gram matrix approach with frobenius distance"""
-    G = compute_gram_matrix(W)
-    identity = np.eye(W.shape[1])  # Identity matrix of size X (number of neurons)
-    return np.linalg.norm(G - identity, 'fro')**2  # Frobenius norm of (G - I)^2
+# def orthogonality_loss_gram(W):
+#     """Compute the orthogonality loss using Gram matrix approach with frobenius distance"""
+#     G = compute_gram_matrix(W)
+#     identity = np.eye(W.shape[1])  # Identity matrix of size number of neurons
+#     return np.linalg.norm(G - identity, 'fro')**2  # Frobenius norm of (G - I)^2
 
-def mmd_loss(W, target_distribution):
-    # Target distribution ca be created exploiting random orthogonal vectors like this: q, _ = np.linalg.qr(vectors) (Orthonormal upper-triangular)
-    """Compute the Maximal Mean Discrepancy (MMD) loss."""
-    phi_W = np.mean(W, axis=0)  # Feature map for neuron weights
-    phi_V = np.mean(target_distribution, axis=0)  # Feature map for target distribution
-    return np.linalg.norm(phi_W - phi_V)**2
+# def mmd_loss(W, target_distribution):
+#     # Target distribution ca be created exploiting random orthogonal vectors like this: q, _ = np.linalg.qr(vectors) (Orthonormal upper-triangular)
+#     """Compute the Maximal Mean Discrepancy (MMD) loss."""
+#     phi_W = np.mean(W, axis=0)  # Feature map for neuron weights
+#     phi_V = np.mean(target_distribution, axis=0)  # Feature map for target distribution
+#     return np.linalg.norm(phi_W - phi_V)**2
 
-def cosine_similarity_loss(W):
-    """Compute the cosine similarity loss."""
-    X = W.shape[1]  # Number of neurons
-    similarity_sum = 0.0
-    for i in range(X - 1):
-        for j in range(i + 1, X):
-            similarity = np.dot(W[:, i], W[:, j]) / (np.linalg.norm(W[:, i]) * np.linalg.norm(W[:, j]))
-            similarity_sum += similarity
-    return -similarity_sum / (X * (X - 1) / 2)
+# def cosine_similarity_loss(W):
+#     """Compute the cosine similarity loss."""
+#     X = W.shape[1]  # Number of neurons
+#     similarity_sum = 0.0
+#     for i in range(X - 1):
+#         for j in range(i + 1, X):
+#             similarity = np.dot(W[:, i], W[:, j]) / (np.linalg.norm(W[:, i]) * np.linalg.norm(W[:, j]))
+#             similarity_sum += similarity
+#     return -similarity_sum / (X * (X - 1) / 2) 
