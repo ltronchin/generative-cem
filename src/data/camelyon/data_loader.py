@@ -29,7 +29,7 @@ from torchvision.transforms import Compose, Lambda
 
 class CamelyonDataset(Dataset):
     """Custom Dataset for loading Camelyion image patches with labels and concepts."""
-    def __init__(self, subset, csv_file, split, root_dir, normalize=True, to_tensor=True, transform=None):
+    def __init__(self, subset, csv_file, root_dir, normalize=True, to_tensor=True, transform=None):
         """
         Args:
             subset (list): List of subset names to load.
@@ -44,8 +44,8 @@ class CamelyonDataset(Dataset):
         self.subset = subset
         self.df = pd.read_csv(csv_file)
         # Filter the data frame based on the split.
-        self.df = self.df[self.df['split'] == split]
-        self.df = self.df.reset_index(drop=True)
+        # self.df = self.df[self.df['split'] == split]
+        # self.df = self.df.reset_index(drop=True)
         self.root_dir = root_dir
         self.normalize = normalize
         self.to_tensor = to_tensor
@@ -112,14 +112,15 @@ if __name__ == "__main__":
         'full_contrast',
     ]
 
+    os.chdir('/home/riccardo/Github/generative-cem')
     # Directories.
     interim_dir = os.path.join('data', dataset_name, 'interim')  # here find the concepts and data splits
     concept_dir = os.path.join(interim_dir, 'cmeasures')
-    raw_dir = os.path.join('data', dataset_name, 'raw')  # here find the patches
+    raw_dir = '/home/lorenzo/generative-cem/data/camelyon/raw' # here find the patches
     reports_dir = os.path.join('reports', dataset_name)
 
     # Initialize the dataset (example)
-    dataset_train = CamelyonDataset(subset=subset_name_list, csv_file=os.path.join(concept_dir, f'concepts_patients_splits.csv'), split='train', root_dir=raw_dir, normalize=True, to_tensor=True, transform=None)
+    dataset_train = CamelyonDataset(subset=subset_name_list, csv_file=os.path.join(concept_dir, f'df_train.csv'), root_dir=raw_dir, normalize=True, to_tensor=True, transform=None)
     #dataset_train = CamelyonDatasetEfficient(subset=subset_name_list, csv_file=os.path.join(concept_dir, f'concepts_patients_splits.csv'), split='train', root_dir=raw_dir, transform=None)
 
     # Initialize the data loader

@@ -1,3 +1,4 @@
+#%%
 """
 Splits for Camelyon.
 """
@@ -23,6 +24,7 @@ import time
 import argparse
 import json
 import yaml
+import pandas as pd
 
 from src.utils import util_path
 from src.utils import util_nn
@@ -34,6 +36,7 @@ pt_to_inch = 1 / 72.27
 column_width_inches = column_width_pt * pt_to_inch
 aspect_ratio = 4 / 3
 sns.set(style="whitegrid", font_scale=1.6, rc={"figure.figsize": (column_width_inches, column_width_inches / aspect_ratio)})
+#%% 
 
 def parse_args():
     parser = argparse.ArgumentParser(description=".")
@@ -41,12 +44,12 @@ def parse_args():
     return parser.parse_args()
 
 if __name__ == "__main__":
+#%%
+    # args = parse_args()
 
-    args = parse_args()
-
-    # cfg_file = '/home/riccardo/Github/generative-cem/configs/sequential.yaml'
+    cfg_file = '/home/riccardo/Github/generative-cem/configs/sequential_10100.yaml'
     # Load JSON file. from the disk.
-    with open(args.cfg_file) as file:
+    with open(cfg_file) as file:        # args.cfg_file
         cfg = yaml.load(file, Loader=yaml.FullLoader)
 
     exp_name = cfg['exp_name']
@@ -96,8 +99,9 @@ if __name__ == "__main__":
     weight_task_loss = cfg_train['weight_task_loss']
     weight_rec_loss = cfg_train['weight_rec_loss']
     weight_lat_loss = cfg_train['weight_lat_loss']
+    weight_orth_loss = cfg_train['weight_orth_loss']
 
-    # Dataset.
+     # Dataset.
     if 'dsprites' in dataset_name:
         datasets = {
             step: util_data.dSpritesDataset(data_dir=data_dir, fname=f'{file_name}_{step}.{file_type}', use_concepts=True)
@@ -130,12 +134,13 @@ if __name__ == "__main__":
     # Train - Paul Kalkbrenner
     device = torch.device(device_name if torch.cuda.is_available() else "cpu")
     model = model.to(device)
-
-    model, train_history = util_nn.train_model(
+#%%
+    model, train_history, mse_errors_dict = util_nn.train_model(
         model=model,
         data_loaders=data_loaders,
         learning_rate=learning_rate,
-        weights = {'concept': weight_concept_loss,'task': weight_task_loss, 'rec':weight_rec_loss, 'lat':weight_lat_loss},
+        weights = {'concept': weight_concept_loss,'task': weight_task_loss, \
+                   'rec': weight_rec_loss, 'lat': weight_lat_loss, 'orth': weight_orth_loss},
         num_epochs=num_epochs,
         early_stopping=early_stopping,
         warmup_epoch=warmup_epoch,
@@ -143,10 +148,10 @@ if __name__ == "__main__":
         device=device,
         freeze_encoder=freeze_encoder,
     )
-
+#%%
     # Save history.
     train_history.to_csv(os.path.join(reports_dir, 'train_history.csv'), index=False)
-
+    
     # Evaluate.
     print("Evaluating the model.")
     test_history = util_nn.evaluate(model=model, data_loader=data_loaders['test'], device=device)
@@ -170,4 +175,29 @@ if __name__ == "__main__":
     util_nn.plot_training(train_history, reports_dir, loss_names=['val_concept_loss', 'val_task_loss', 'val_rec_loss', 'val_total_loss'])
     util_nn.plot_reconstructions(reports_dir, model, data_loaders['test'], device, num_images=5)
 
+    mse_data_loaders = {
+    step: DataLoader(datasets[step], batch_size=1, shuffle=True)
+    for step in ['train', 'val', 'test']
+    }
+    # Correlations and mse
+    util_nn.calculate_and_save_distances(model, mse_data_loaders, device, reports_dir)
+    util_nn.plot_mse_values(reports_dir +'/distances.pkl')
+    util_nn.calculate_and_save_correlations(model, mse_data_loaders, device, reports_dir)
+    util_nn.plot_correlations(reports_dir +'/correlations.pkl')
+    
+    
+    # # Save MSE erros history to CSV
+    # with open(os.path.join(reports_dir, 'mse_errors.csv'), 'w') as f:
+    #     for epoch in mse_errors_dict:
+    #         for phase in mse_errors_dict[epoch]:
+    #             f.write(f'EPOCH {epoch + 1} - Phase: {phase}\n')
+    #             df = pd.DataFrame(mse_errors_dict[epoch][phase])
+    #             df.to_csv(f, index=False)
+    #             f.write('\n')
+    
+    # Plot MSE for each supervised concepts  vs epochs for visualizations 
+    util_nn.plot_sup_unsup_mse(mse_errors_dict, preds_concepts_size=n_concepts, unsup_concepts_size=n_model_concepts, 
+                           save_dir=reports_dir)
+    
     print("May the force be with you!")
+# %%

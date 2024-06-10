@@ -20,18 +20,17 @@ aspect_ratio = 4 / 3
 sns.set(style="whitegrid", font_scale=1.6, rc={"figure.figsize": (column_width_inches, column_width_inches / aspect_ratio)})
 
 # Funzione che seleziona il modello in base all'esperimento
-# TO DO: Another end-to-end col blocco unsupervised
-def select_model(exp_name, input_size, num_concepts, num_embed_for_concept, num_model_concepts, num_classes):
 
-    if exp_name == 'independent_concept':
+def select_model(exp_name, input_size, num_concepts, num_embed_for_concept, num_model_concepts, num_classes):
+    if 'independent_concept' in exp_name:
         return Encoder(input_size, num_concepts, num_embed_for_concept=8, num_model_concepts=num_model_concepts)
-    elif exp_name == 'independent_predictor':
+    elif 'independent_predictor' in exp_name:
         return MLP(num_concepts, num_classes)
-    elif exp_name == 'independent_decoder':
+    elif 'independent_decoder' in exp_name:
         return Decoder(input_size, num_concepts, num_model_concepts=num_model_concepts)
-    elif exp_name == 'sequential':
+    elif 'sequential' in exp_name:
         return End2End(input_size, num_concepts, num_classes, num_embed_for_concept, num_model_concepts)
-    elif exp_name == 'joint':
+    elif 'joint' in exp_name:
         return End2End(input_size, num_concepts, num_classes, num_embed_for_concept, num_model_concepts)
     else:
         raise ValueError("Invalid experiment name.")
@@ -104,6 +103,7 @@ class Encoder(nn.Module):
    # Split flattened features into chunks of num_embed_for_concept and pass through linear layers
         concept_outputs = []
         model_concept_outputs = []
+        linear_weights = []
 
         for i, linear_layer in enumerate(self.linear_layers):
             chunk = x[:, i * self.num_embed_for_concept : (i + 1) * self.num_embed_for_concept]
@@ -115,6 +115,9 @@ class Encoder(nn.Module):
                 # Learn unsupervised concepts for the remaining linear layers 
                 model_concept_output = linear_layer(chunk)
                 model_concept_outputs.append(model_concept_output)
+            
+            # Save the weights of the linear layer
+            linear_weights.append(linear_layer.weight)
 
         # Concatenate outputs along the feature dimension
         if concept_outputs:
@@ -124,7 +127,7 @@ class Encoder(nn.Module):
         else:
             model_concept_output = None
 
-        return concept_outputs, model_concept_outputs
+        return concept_outputs, model_concept_outputs, linear_weights
 
 #%%
 class Decoder(nn.Module):
@@ -171,7 +174,7 @@ class IndependentMLP(nn.Module):
         self.predictor = MLP(num_concepts + num_model_concepts, num_classes)
 
     def forward(self, x):
-        #TODO: This is working on BOTH supervised and unsupervised!
+        # This is working on BOTH supervised and unsupervised!
         c = self.concept_encoder(x)
         y = self.predictor(c)
 
@@ -186,7 +189,7 @@ class End2End(nn.Module):
 
     def forward(self, x):
 
-        c1, c2 = self.concept_encoder(x)
+        c1, c2, linear_weigths = self.concept_encoder(x)
         # print(c1.size(), c2.size())
         c = torch.cat((c1,c2), dim=1)
         # print(c.size())
@@ -200,9 +203,9 @@ class End2End(nn.Module):
         y = self.predictor(c)
 
         x_tilde = self.concept_decoder(c)
-        c_tilde, _ = self.concept_encoder(x_tilde)
+        c_tilde, _, _ = self.concept_encoder(x_tilde)
 
-        return c1, c2, y, x_tilde, c_tilde
+        return c1, c2, y, x_tilde, c_tilde, linear_weigths
 
 #%%
 def test_encoder(img_size, num_channels, num_concepts, num_model_concepts=0):
@@ -274,6 +277,5 @@ if __name__ == "__main__":
     test_MLP(concepts + model_concepts, classes)
     test_endtoend(size, channels, concepts, classes, model_concepts)
     
-    #TO DO: Change training to take care of num_model_concepts
-    #TO DO: Calcolare MSE tra unsupervised concepts and the CONCEPTS previously taken out from the dsprite
-    #TO DO: Create new Yaml file for the experiments
+    #TODO: Calcolare MSE tra unsupervised concepts and the CONCEPTS previously taken out from the dsprite
+    #TODO: Create new Yaml file for the experiments

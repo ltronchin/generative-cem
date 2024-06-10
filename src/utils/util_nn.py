@@ -17,7 +17,7 @@ import torch.nn.functional as F
 # Figure properties.
 import seaborn as sns
 import matplotlib.pyplot as plt
-#%%
+
 column_width_pt = 516.0
 pt_to_inch = 1 / 72.27
 column_width_inches = column_width_pt * pt_to_inch
@@ -25,7 +25,7 @@ aspect_ratio = 4 / 3
 sns.set(style="whitegrid", font_scale=2, rc={"figure.figsize": (column_width_inches, column_width_inches / aspect_ratio)})
 sns.set_context("paper")
 
-
+#%%
 def select_trainer():
     pass
 
@@ -43,6 +43,7 @@ def train_model(model, data_loaders, learning_rate, weights, num_epochs, early_s
     weight_task_loss = weights['task']
     weight_rec_loss = weights['rec']
     weight_lat_loss = weights['lat']
+    weight_orth_loss = weights['orth']
 
     if freeze_encoder:
         for param in model.concept_encoder.parameters():
@@ -50,12 +51,13 @@ def train_model(model, data_loaders, learning_rate, weights, num_epochs, early_s
 
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     criterion_c = nn.MSELoss()      # Loss dei concetti
-    criterion_y = nn.CrossEntropyLoss()
+    criterion_y = nn.CrossEntropyLoss()# Loss classifcation
     criterion_rec = nn.MSELoss()     # Loss generation
     criterion_lat = nn.MSELoss()    
     
     # TODO: Loss ortogonalità di tutti i concetti sia supervised che unsupervised. 
     # Orthogonalità dei concetti supervised e unsupervised ma non tra tutti. 
+    # Possible to build two mse_dictionary during training for different labels, as activation should change within label
 
     best_model_wts = copy.deepcopy(model.state_dict())
     best_loss = np.Inf
@@ -65,16 +67,18 @@ def train_model(model, data_loaders, learning_rate, weights, num_epochs, early_s
         'train_task_loss': [],
         'train_rec_loss': [],
         'train_lat_loss': [],
+        'train_orth_loss': [],
         'train_total_loss': [],
-        'train_dist_sup_unsup': [],
         'val_concept_loss': [],
         'val_task_loss': [],
         'val_rec_loss': [],
         'val_lat_loss': [],
-        'val_total_loss': [],
-        'val_dist_sup_unsup': []
+        'val_orth_loss': [],
+        'val_total_loss': []
     }
 
+    epoch_mse_errors_dict = {}
+    
     epochs_no_improve = 0
     best_epoch = 0
     early_stop = False
@@ -83,6 +87,8 @@ def train_model(model, data_loaders, learning_rate, weights, num_epochs, early_s
     for epoch in range(num_epochs):
         print('Epoch {}/{}'.format(epoch, num_epochs - 1))
         print('-' * 10)
+        # Build distances dictionary of dictionaries
+        epoch_mse_errors_dict[epoch] = {}
 
         # Each epoch has a training and validation phase
         for phase in ['train', 'val']:
@@ -95,9 +101,9 @@ def train_model(model, data_loaders, learning_rate, weights, num_epochs, early_s
             running_concept_loss = 0.0
             running_rec_loss = 0.0
             running_lat_loss = 0.0
+            running_orth_loss = 0.0
             running_loss = 0.0
-            running_sup_unsup_dist = 0.0
-
+            running_sup_unsup_dist = {}
             # Iterate over data.
             for sample in tqdm(data_loaders[phase]):
 
@@ -107,7 +113,7 @@ def train_model(model, data_loaders, learning_rate, weights, num_epochs, early_s
                 # forward
                 with torch.set_grad_enabled(phase == 'train'):
                     # print(imgs.size())
-                    preds_concepts, unsup_concepts, preds_task, preds_img_tilde, preds_concepts_tilde = model(imgs)
+                    preds_concepts, unsup_concepts, preds_task, preds_img_tilde, preds_concepts_tilde, linear_weights = model(imgs)
                     _, preds = torch.max(preds_task, 1)
 
                     loss = torch.tensor(0.0).to(device)
@@ -124,43 +130,57 @@ def train_model(model, data_loaders, learning_rate, weights, num_epochs, early_s
                     lat_loss = criterion_lat(preds_concepts_tilde, concepts)
                     loss += (weight_lat_loss * lat_loss)
                     
-                    sup_unsup_dist = F.mse_loss(preds_concepts, unsup_concepts)
+                    # orth_loss = cosine_similarity_loss(linear_weights)
+                    orth_loss = orth_frob_loss(linear_weights)
+                    # orth_loss = orth_gram_loss(linear_weights)
+                    loss += (weight_orth_loss * orth_loss)
+                    
                     # backward + optimize only if in training phase
                     if phase == 'train':
                         loss.backward()
                         optimizer.step()
+                # Calculate pairwise MSE (average over batch dimension)
+                for i in range(preds_concepts.size(1)):
+                        for j in range(unsup_concepts.size(1)):
+                            if (i, j) not in running_sup_unsup_dist:
+                                running_sup_unsup_dist[(i, j)] = 0.0
+                            running_sup_unsup_dist[(i, j)] += F.mse_loss(preds_concepts[:, i], unsup_concepts[:, j]).item()
 
                 # Statistics
                 running_task_loss += task_loss.item()
                 running_concept_loss += concept_loss.item()
                 running_rec_loss += rec_loss.item()
                 running_lat_loss += lat_loss.item()
+                running_orth_loss += orth_loss.item()
                 running_loss += loss.item()
-                running_sup_unsup_dist += sup_unsup_dist.item()
 
             epoch_task_loss = running_task_loss / len(data_loaders[phase])
             epoch_concept_loss = running_concept_loss / len(data_loaders[phase])
             epoch_rec_loss = running_rec_loss / len(data_loaders[phase])
             epoch_lat_loss = running_lat_loss / len(data_loaders[phase])
+            epoch_orth_loss = running_orth_loss / len(data_loaders[phase])
             epoch_loss = running_loss / len(data_loaders[phase])
-            # Average distance between supervised and unsupervised (must be equal in number)
-            epoch_sup_unsup_dist = running_sup_unsup_dist / len(data_loaders[phase])
-
+            
+            # Average over total number of batches
+            for key in running_sup_unsup_dist:
+                running_sup_unsup_dist[key] /= len(data_loaders[phase])
+            epoch_mse_errors_dict[epoch][phase] = running_sup_unsup_dist
+            
             # update history
             if phase == 'train':
                 history['train_task_loss'].append(epoch_task_loss)
                 history['train_concept_loss'].append(epoch_concept_loss)
                 history['train_rec_loss'].append(epoch_rec_loss)
                 history['train_lat_loss'].append(epoch_lat_loss)
+                history['train_orth_loss'].append(epoch_orth_loss)
                 history['train_total_loss'].append(epoch_loss)
-                history['train_dist_sup_unsup'].append(epoch_sup_unsup_dist)
             else:
                 history['val_task_loss'].append(epoch_task_loss)
                 history['val_concept_loss'].append(epoch_concept_loss)
                 history['val_rec_loss'].append(epoch_rec_loss)
                 history['val_lat_loss'].append(epoch_lat_loss)
+                history['val_orth_loss'].append(epoch_orth_loss)
                 history['val_total_loss'].append(epoch_loss)
-                history['val_dist_sup_unsup'].append(epoch_sup_unsup_dist)
 
             print(
                 f"Phase: {phase} - Epoch: {epoch + 1}, "
@@ -168,7 +188,8 @@ def train_model(model, data_loaders, learning_rate, weights, num_epochs, early_s
                 f"Task Loss: {epoch_task_loss:.4f}, "
                 f"Concept Loss: {epoch_concept_loss:.4f}, "
                 f"Rec Loss: {epoch_rec_loss:.4f}, "
-                f"Lat Loss: {epoch_lat_loss:.4f}."
+                f"Lat Loss: {epoch_lat_loss:.4f}, "
+                f"Orth Loss: {epoch_lat_loss:.4f}."
             )
 
             # deep copy the model
@@ -206,7 +227,8 @@ def train_model(model, data_loaders, learning_rate, weights, num_epochs, early_s
     # Format history
     history = pd.DataFrame.from_dict(history, orient='index').transpose()
 
-    return model, history
+    return model, history, epoch_mse_errors_dict
+#%%
 
 def evaluate(model, data_loader, device):
 
@@ -226,7 +248,7 @@ def evaluate(model, data_loader, device):
             all_concepts.extend(concepts.cpu().numpy())
 
             # Prediction
-            preds_concepts, unsup_concepts, preds_task, preds_rec, preds_lat = model(inputs)
+            preds_concepts, unsup_concepts, preds_task, preds_rec, preds_lat, _ = model(inputs)
             _, preds = torch.max(preds_task, 1)
 
             all_preds.extend(preds.cpu().numpy())
@@ -270,7 +292,7 @@ def predict(model, data_loader, device):
         for sample in tqdm(data_loader):
             inputs, _, _ = sample['image'].to(device), sample['concepts'].to(device), sample['label'].to(device)
 
-            preds_concepts, _, _, _, _ = model(inputs)
+            preds_concepts, _, _, _, _, _ = model(inputs)
             all_preds_concepts.extend(preds_concepts.cpu().numpy())
 
     all_preds_concepts = np.array(all_preds_concepts)
@@ -330,7 +352,7 @@ def plot_reconstructions(plot_training_dir, model, data_loader, device, num_imag
         for sample in data_loader:
             x = sample['image'].to(device)
             # Assuming the model returns reconstruction in the third position
-            _, _, _, x_tilde, _ = model(x)
+            _, _, _, x_tilde, _, _ = model(x)
             break  # Only take the first batch
 
     # To numpy.
@@ -348,17 +370,284 @@ def plot_reconstructions(plot_training_dir, model, data_loader, device, num_imag
     x_out = Image.fromarray(x_out[:, :, 0])
     x_out.save(os.path.join(plot_training_dir, "img_rec.pdf"), resolution=400)
     
-############################### RICCARDO ########################
-# def compute_gram_matrix(W):
-#     """Compute the Gram matrix of neuron weights W."""
-#     return np.dot(W.T, W)
+######################### RICCARDO MSE PAIRWISE ########################
+def mse_error_pairwise_batch(tensor1, tensor2):
+    """
+    Calculate the MSE between each value in tensor1 and all values in tensor2 for batches.
+    
+    Returns:
+        torch.Tensor: Averaged MSE errors over the batch dimension, same size of Tensor1
+    """
+    batch_size, n1 = tensor1.shape
+    _, n2 = tensor2.shape
 
-# def orthogonality_loss_gram(W):
-#     """Compute the orthogonality loss using Gram matrix approach with frobenius distance"""
-#     G = compute_gram_matrix(W)
-#     identity = np.eye(W.shape[1])  # Identity matrix of size number of neurons
-#     return np.linalg.norm(G - identity, 'fro')**2  # Frobenius norm of (G - I)^2
+    errors = torch.zeros(batch_size, n1, n2).to(tensor1.device)
 
+    for i in range(n1):
+        for j in range(n2):
+            errors[:, i, j] = F.mse_loss(tensor1[:, i], tensor2[:, j], reduction='none')
+            # print(f"MSE between tensor1[:, {i}] and tensor2[:, {j}]:")
+            # print(errors[:, i, j])
+            # print("-------------")
+    
+    return errors.mean(dim=0)
+    
+def plot_sup_unsup_mse_epoch(mse_errors_dict, preds_concepts_size, unsup_concepts_size, save_dir):
+    num_epochs = len(mse_errors_dict)
+    for i in range(preds_concepts_size):
+        plt.figure()
+        for j in range(unsup_concepts_size):
+            train_values = [mse_errors_dict[epoch]['train'].get((i, j), None) for epoch in range(num_epochs)]
+            val_values = [mse_errors_dict[epoch]['val'].get((i, j), None) for epoch in range(num_epochs)]
+            plt.plot(range(1, num_epochs + 1), train_values, label=f'Concept {j + 1}', linestyle='-', color=f'C{j}')
+            plt.plot(range(1, num_epochs + 1), val_values, linestyle='--', color=f'C{j}')
+
+        plt.xlabel('Epochs')
+        plt.ylabel('MSE')
+        #plt.ylim(0, 0.05)   FIX A TRESHOLD for visualization purposes
+        plt.title(f'Preds_concept {i + 1}')
+        plt.legend(title='Legend:', loc='best', fontsize='small')
+        plt.text(0.5, 0.92, 'Continuous line: Train\n-- line: Validation', horizontalalignment='center', 
+                 verticalalignment='center', fontsize='small',
+                 transform=plt.gca().transAxes, bbox=dict(facecolor='white', alpha=0.5))
+        plt.savefig(os.path.join(save_dir, f'mse_epoch_preds_concept_{i + 1}.png'))
+        # plt.show()
+        plt.close()
+
+#################################################### correlations a distances post taining ############################
+import pickle
+from itertools import combinations
+from scipy.stats import pearsonr, spearmanr
+def calculate_and_save_distances(model, data_loaders, device, output_dir):
+    model.eval()  # Set model to evaluation mode
+    
+    distance_dict = {}
+
+    for phase in ['train', 'val', 'test']:
+        count = 0
+        for idx, sample in tqdm(enumerate(data_loaders[phase]), desc=f'Calculating distances for {phase}'):
+            if count >= 400:
+                break
+            
+            imgs, concepts = sample['image'].to(device), sample['concepts'].to(device)
+
+            with torch.no_grad():
+                preds_concepts, unsup_concepts, _, _, _, _ = model(imgs)
+
+                sample_distances = np.zeros((preds_concepts.size(1), unsup_concepts.size(1)))
+
+                for i in range(preds_concepts.size(1)):
+                    for j in range(unsup_concepts.size(1)):
+                        # Batch size = 1 so reduction is none
+                        mse_value = F.mse_loss(preds_concepts[:, i], unsup_concepts[:, j], reduction='none').item()
+                        sample_distances[i, j] = mse_value
+
+            distance_dict[(phase, idx)] = sample_distances
+            
+            count += 1
+        # print(f'DIST DICT: -> {np.shape(distance_dict[(phase, idx-1)])}')
+    
+    # Save distances to file
+    distance_file_path = os.path.join(output_dir, 'distances.pkl')
+    with open(distance_file_path, 'wb') as f:
+        pickle.dump(distance_dict, f)
+
+
+    return print(f'Distances saved to {distance_file_path}')
+
+def plot_mse_values(distance_file_path, save_dir=None):
+    
+    if save_dir is None:
+        save_dir = distance_file_path
+    # Load distances from the file
+    with open(distance_file_path, 'rb') as f:
+        distance_dict = pickle.load(f)
+
+    # Extract the first (phase, idx) tuple from the dictionary to get the number of concepts
+    first_key = list(distance_dict.keys())[0]
+    n_pred_concepts, n_unsup_concepts = distance_dict[first_key].shape
+
+    # Prepare the figure
+    fig, axs = plt.subplots(n_pred_concepts, figsize=(10, 6 * n_pred_concepts))
+    if n_pred_concepts == 1:
+        axs = [axs]
+
+    # Plot for each prediction concept
+    for i in range(n_pred_concepts):
+        mse_values = np.array([distances[i] for distances in distance_dict.values()])
+        
+        # Calculate mean MSE values across all samples for the current prediction concept
+        mean_mse_values = mse_values.mean(axis=0)
+        
+        x_labels = [f'Unsup Concept {j+1}' for j in range(n_unsup_concepts)]
+        
+        bar_width = 0.35
+        x = np.arange(len(x_labels))
+        
+        axs[i].bar(x, mean_mse_values, bar_width, label=f'Preds Concept {i}', color='blue')
+        
+        axs[i].set_title(f'MSE Values for Preds Concept {i}')
+        axs[i].set_ylabel('Mean MSE')
+        axs[i].set_xticks(x)
+        axs[i].set_xticklabels(x_labels, rotation=45, ha='right')
+        axs[i].grid(axis='y', linestyle='--', alpha=0.7)
+        axs[i].legend()
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(save_dir, f'mse_preds_concept_{i + 1}.png'))
+    plt.show()
+    plt.close()
+    
+    return print(f'Plot saved to {save_dir}')
+    
+    
+def calculate_and_save_correlations(model, data_loaders, device, output_dir):
+    model.eval()  # Set model to evaluation mode
+
+    preds_concepts_list = []
+    unsup_concepts_list = []
+
+    for phase in ['train', 'val', 'test']:
+        count = 0
+        for idx, sample in tqdm(enumerate(data_loaders[phase]), desc=f'Extracting concepts for {phase}'):
+            if count >= 1000:
+                break
+            
+            imgs, concepts = sample['image'].to(device), sample['concepts'].to(device)
+
+            with torch.no_grad():
+                preds_concepts, unsup_concepts, _, _, _, _ = model(imgs)
+
+                preds_concepts_list.append(preds_concepts.cpu().numpy())
+                unsup_concepts_list.append(unsup_concepts.cpu().numpy())
+            
+            count += 1
+
+    preds_concepts_array = np.concatenate(preds_concepts_list, axis=0)
+    unsup_concepts_array = np.concatenate(unsup_concepts_list, axis=0)
+
+    n_pred_concepts = preds_concepts_array.shape[1]
+    n_unsup_concepts = unsup_concepts_array.shape[1]
+
+    correlations = {}
+
+    for i in range(n_pred_concepts):
+        pearson_values = []
+        spearman_values = []
+        for j in range(n_unsup_concepts):
+            # Pearson correlation
+            pearson_corr, _ = pearsonr(preds_concepts_array[:, i], unsup_concepts_array[:, j])
+            # Spearman correlation
+            spearman_corr, _ = spearmanr(preds_concepts_array[:, i], unsup_concepts_array[:, j])
+            pearson_values.append(pearson_corr)
+            spearman_values.append(spearman_corr)
+        correlations[i] = {'pearson': pearson_values, 'spearman': spearman_values}
+
+    # Save correlations to file
+    correlation_file_path = os.path.join(output_dir, 'correlations.pkl')
+    with open(correlation_file_path, 'wb') as f:
+        pickle.dump(correlations, f)
+
+    
+    return print(f'Correlations saved to {correlation_file_path}')
+
+def plot_correlations(correlation_file_path, save_dir = None):
+    
+    if save_dir is None:
+        save_dir = correlation_file_path
+        
+    with open(correlation_file_path, 'rb') as f:
+        correlations = pickle.load(f)
+    
+    n_pred_concepts = len(correlations)
+    n_unsup_concepts = len(correlations[0]['pearson'])
+    
+    fig, axs = plt.subplots(n_pred_concepts, figsize=(10, 6 * n_pred_concepts))
+    
+    if n_pred_concepts == 1:
+        axs = [axs]
+
+    for i in range(n_pred_concepts):
+        pearson_values = correlations[i]['pearson']
+        spearman_values = correlations[i]['spearman']
+        
+        x_labels = [f'Unsup Concept {j+1}' for j in range(n_unsup_concepts)]
+        
+        bar_width = 0.35
+        x = np.arange(len(x_labels))
+        
+        axs[i].bar(x - bar_width/2, pearson_values, bar_width, label='Pearson', color='blue')
+        axs[i].bar(x + bar_width/2, spearman_values, bar_width, label='Spearman', color='orange')
+        
+        axs[i].set_title(f'Correlations for Preds Concept {i}')
+        axs[i].set_ylabel('Correlation Coefficient')
+        axs[i].set_xticks(x)
+        axs[i].set_xticklabels(x_labels, rotation=45, ha='right')
+        axs[i].grid(axis='y', linestyle='--', alpha=0.7)
+        axs[i].legend()
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(save_dir, f'corr_preds_concept_{i + 1}.png'))
+    plt.show()
+    plt.close()
+
+############################### RICCARDO  ORTHOGONALITY ########################
+#%%
+def orth_frob_loss(weight_vectors, sup_unsup_tuple=None, one_vs_all=False):
+    """Compute the orthogonal loss for a list of weight vectors.
+    
+    Parameters:
+    weight_vectors (list of torch.Tensor): A list of 1D tensors, where each tensor represents
+                                            the weight vector of a linear layer. Each tensor has 
+                                            shape (vector_dimension,).
+    sup_unsup_tuple (tuple, optional): A tuple (X, Y) to split the weight vectors into two parts.
+    one_vs_all (bool, optional): If True, sets the Gram matrix entries to zero for the inner 
+                                 products between vectors in the first part specified by sup_unsup_tuple.
+    
+    Returns:
+    torch.Tensor: A scalar tensor representing the Frobenius norm of the difference between 
+                  the Gram matrix of the weight vectors and the identity matrix. This loss 
+                  encourages the weight vectors to be orthogonal.
+    """
+    
+    if sup_unsup_tuple is None:
+        # Concatenate all weight vectors into a single tensor
+        concatenated_vectors = torch.cat(weight_vectors, dim=0)
+        gram_matrix = torch.matmul(concatenated_vectors, concatenated_vectors.t())
+        identity_matrix = torch.eye(gram_matrix.size(0), device=gram_matrix.device)
+        frobenius_loss = torch.norm(gram_matrix - identity_matrix, 'fro')
+    else:
+        X, Y = sup_unsup_tuple
+        assert X + Y == len(weight_vectors), "The sum of X and Y must equal the number of weight vectors"
+
+        # Split the weight vectors into two parts
+        part_A = torch.cat(weight_vectors[:X], dim=0)
+        part_B = torch.cat(weight_vectors[X:X+Y], dim=0)
+        
+        if one_vs_all:
+            # Concatenate all vectors and compute the full Gram matrix
+            concatenated_vectors = torch.cat(weight_vectors, dim=0)
+            gram_matrix = torch.matmul(concatenated_vectors, concatenated_vectors.t())
+            
+            # Set the inner products of the first X concepts equal zero
+            gram_matrix[:X, :X] = 0
+            gram_matrix[X:X+Y, X:X+Y] = 0
+            
+            # Compute the Frobenius norm of the Gram matrix with zeros in the specified positions
+            identity_matrix = torch.eye(gram_matrix.size(0), device=gram_matrix.device)
+            frobenius_loss = torch.norm(gram_matrix - identity_matrix, 'fro')
+        else:
+            # Compute the cross Gram matrix between part_A and part_B
+            cross_gram_matrix = torch.matmul(part_A, part_B.t())
+            
+            # We expect this matrix to be close to zero for orthogonality
+            zero_matrix = torch.zeros(cross_gram_matrix.size(), device=cross_gram_matrix.device)
+            
+            # Compute the Frobenius norm of the cross Gram matrix
+            frobenius_loss = torch.norm(cross_gram_matrix - zero_matrix, 'fro')
+
+    return frobenius_loss
+#%%
 # def mmd_loss(W, target_distribution):
 #     # Target distribution ca be created exploiting random orthogonal vectors like this: q, _ = np.linalg.qr(vectors) (Orthonormal upper-triangular)
 #     """Compute the Maximal Mean Discrepancy (MMD) loss."""
@@ -366,12 +655,55 @@ def plot_reconstructions(plot_training_dir, model, data_loader, device, num_imag
 #     phi_V = np.mean(target_distribution, axis=0)  # Feature map for target distribution
 #     return np.linalg.norm(phi_W - phi_V)**2
 
-# def cosine_similarity_loss(W):
-#     """Compute the cosine similarity loss."""
-#     X = W.shape[1]  # Number of neurons
-#     similarity_sum = 0.0
-#     for i in range(X - 1):
-#         for j in range(i + 1, X):
-#             similarity = np.dot(W[:, i], W[:, j]) / (np.linalg.norm(W[:, i]) * np.linalg.norm(W[:, j]))
-#             similarity_sum += similarity
-#     return -similarity_sum / (X * (X - 1) / 2) 
+def orth_gram_loss(weight_vectors):
+    """
+    Compute the orthogonal loss for a list of weight vectors.
+    
+    Parameters:
+    weight_vectors (list of torch.Tensor): A list of 1D tensors, where each tensor represents
+                                            the weight vector of a linear layer. Each tensor has 
+                                            shape (vector_dimension,).
+    
+    Returns:
+    torch.Tensor: A scalar tensor representing the mean squared difference between the Gram 
+                  matrix of the weight vectors and the identity matrix. This loss encourages 
+                  the weight vectors to be orthogonal.
+    """
+    
+    # Concatenate all weight vectors into a single tensor
+    concatenated_vectors = torch.stack(weight_vectors)
+    
+    # Compute the Gram matrix
+    gram_matrix = torch.matmul(concatenated_vectors, concatenated_vectors.t())
+    
+    # Compute the mean squared difference from the identity matrix
+    identity_matrix = torch.eye(gram_matrix.size(0), device=gram_matrix.device)
+    mse_loss = torch.mean((gram_matrix - identity_matrix) ** 2)
+    
+    return mse_loss
+
+def cosine_similarity_loss(W):
+    """Compute the cosine similarity loss for the weight matrix W.
+    
+    Parameters:
+    W (torch.Tensor): A 2D tensor of shape (num_layers, num_neurons) representing the weights of 
+                      multiple linear layers. Each row corresponds to the weights of a single 
+                      linear layer, mapping `num_neurons` inputs to a single output.
+    
+    Returns:
+    torch.Tensor: A scalar tensor representing the mean of the off-diagonal elements in the 
+                  cosine similarity matrix of the weight vectors. This loss encourages the 
+                  weight vectors to be orthogonal, as a lower mean similarity indicates more 
+                  orthogonality.
+    """
+    W = W / W.norm(dim=1, keepdim=True)  # Normalize the weight vectors
+    cosine_sim_matrix = torch.mm(W, W.t())  # Compute the cosine similarity matrix
+    
+    # We want the off-diagonal elements to be as close to zero as possible
+    batch_size = W.shape[0]
+    cosine_sim_matrix.fill_diagonal_(0)  # Zero out the diagonal
+    similarity_sum = cosine_sim_matrix.sum() / (batch_size * (batch_size - 1) / 2)
+    
+# %%
+
+    return similarity_sum

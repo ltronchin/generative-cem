@@ -126,8 +126,10 @@ for idx in pannuke_indexes:
             counter = 0
             # write patch idx in the new sub
             df.at[idx, 'patch_idx'] = counter
-            print(counter, idx, current_number)
+            # print(counter, idx, current_number)
             counter += 1
+            
+print(less_image_sub_list)
 # TODO: What we do with those subjects?
 # founded idx: 137692, 138921, 139365, 140603,  141745, 141984, 142907, 144675
 
@@ -208,13 +210,13 @@ def train_val_test_split_df(dataframe, percentages=None, mode=None, manual_sel=N
 
 df_train, df_val, df_test, tr_list, val_list, test_list = train_val_test_split_df(dataframe = df, mode = 'patient_id', percentages = [0.8, 0.10, 0.10], seed=42)
 # Save to the disk.
-df.to_csv('/home/riccardo/Histo_data/concepts.csv', index=False)
+df.to_csv('/home/riccardo/Github/data/camelyon/interim/cmeasure/concepts.csv', index=False)
 
-df_train.to_csv('/home/riccardo/Histo_data/df_train.csv', index=False)
-df_val.to_csv('/home/riccardo/Histo_data/df_val.csv', index=False)
-df_test.to_csv('/home/riccardo/Histo_data/df_test.csv', index=False)
+df_train.to_csv('/home/riccardo/Github/data/camelyon/interim/cmeasures/df_train.csv', index=False)
+df_val.to_csv('/home/riccardo/Github/data/camelyon/interim/cmeasures/df_val.csv', index=False)
+df_test.to_csv('/home/riccardo/Github/data/camelyon/interim/cmeasures/df_test.csv', index=False)
 
-np.savetxt('/home/riccardo/Histo_data/subs_tr.csv', tr_list, fmt='%s', delimiter=',')
-np.savetxt('/home/riccardo/Histo_data/subs_val.csv', val_list, fmt='%s', delimiter=',')
-np.savetxt('/home/riccardo/Histo_data/subs_test.csv', test_list, fmt='%s', delimiter=',')
+np.savetxt('/home/riccardo/Github/data/camelyon/interim/cmeasures/subs_tr.csv', tr_list, fmt='%s', delimiter=',')
+np.savetxt('/home/riccardo/Github/data/camelyon/interim/cmeasures/subs_val.csv', val_list, fmt='%s', delimiter=',')
+np.savetxt('/home/riccardo/Github/data/camelyon/interim/cmeasures/subs_test.csv', test_list, fmt='%s', delimiter=',')
 # %%
