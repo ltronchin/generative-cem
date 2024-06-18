@@ -20,7 +20,7 @@ aspect_ratio = 4 / 3
 sns.set(style="whitegrid", font_scale=1.6, rc={"figure.figsize": (column_width_inches, column_width_inches / aspect_ratio)})
 
 class dSpritesDataset(Dataset):
-    def __init__(self, data_dir, fname, use_concepts=False):
+    def __init__(self, data_dir, fname, use_concepts=False, concept_to_keep = []):
         """
         Args:
             data_dir (string): Directory with all the images.
@@ -34,6 +34,7 @@ class dSpritesDataset(Dataset):
         self.images = data['X']
         self.labels = data['Y']
         self.use_concepts = use_concepts
+        self.concept_to_keep = concept_to_keep
         if self.use_concepts:
             try:
                 self.concepts = data['G']
@@ -59,8 +60,16 @@ class dSpritesDataset(Dataset):
         label = np.array(label).astype(np.int64)
 
         if self.use_concepts:
-            c = self.concepts[idx]
-            c = np.array(c).astype(np.float32)
-            return {'image': im, 'label': label, 'concepts': c}
+            c = np.array(self.concepts[idx], dtype=np.float32)
+            # print(c.shape)
+
+            if self.concept_to_keep:
+                c_to_keep = c[self.concept_to_keep]
+                c_excl = np.delete(c, self.concept_to_keep, axis=0)
+                # print(c_excl.shape)
+            else: 
+                c_to_keep = c
+                c_excl = np.empty(0, dtype=np.float32)
+            return {'image': im, 'label': label, 'c_to_keep': c_to_keep, 'c_excl': c_excl}
         else:
             return {'image': im, 'label': label}

@@ -13,6 +13,7 @@ import torch.nn as nn
 import torch
 import torchvision.models as models
 
+
 column_width_pt = 516.0
 pt_to_inch = 1 / 72.27
 column_width_inches = column_width_pt * pt_to_inch
@@ -32,6 +33,8 @@ def select_model(exp_name, input_size, num_concepts, num_embed_for_concept, num_
         return End2End(input_size, num_concepts, num_classes, num_embed_for_concept, num_model_concepts)
     elif 'joint' in exp_name:
         return End2End(input_size, num_concepts, num_classes, num_embed_for_concept, num_model_concepts)
+    elif 'independet_encoder_predictor':
+        return IndependentMLP(input_size, num_concepts, num_classes, num_embed_for_concept=8, num_model_concepts=num_model_concepts)
     else:
         raise ValueError("Invalid experiment name.")
 
@@ -49,7 +52,6 @@ class MLP(nn.Module):
         output = self.classifier(concepts)
         return output
 #%%
-# TO DO: - Loss di indipendenza tra i neuroni (perpendicolarità)
 class Encoder(nn.Module):
     def __init__(self, input_size, num_concepts, num_embed_for_concept=16, num_model_concepts = 0, feature_sizes=(16, 32, 64, 128)):
         super(Encoder, self).__init__()
@@ -108,11 +110,11 @@ class Encoder(nn.Module):
         for i, linear_layer in enumerate(self.linear_layers):
             chunk = x[:, i * self.num_embed_for_concept : (i + 1) * self.num_embed_for_concept]
             if i < self.num_concepts:
-                # Predict a single continuous value (regression) for the first num_concepts linear layers
+                # First i are supervised
                 concept_output = linear_layer(chunk)
                 concept_outputs.append(concept_output)
             else:
-                # Learn unsupervised concepts for the remaining linear layers 
+                # Remaining unsupervised 
                 model_concept_output = linear_layer(chunk)
                 model_concept_outputs.append(model_concept_output)
             
@@ -120,12 +122,12 @@ class Encoder(nn.Module):
             linear_weights.append(linear_layer.weight)
 
         # Concatenate outputs along the feature dimension
-        if concept_outputs:
-            concept_outputs = torch.cat(concept_outputs, dim=1)
-        if self.num_model_concepts != 0:
+        concept_outputs = torch.cat(concept_outputs, dim=1)
+      
+        if model_concept_outputs:
             model_concept_outputs = torch.cat(model_concept_outputs, dim=1)
         else:
-            model_concept_output = None
+            model_concept_outputs = None
 
         return concept_outputs, model_concept_outputs, linear_weights
 
@@ -167,18 +169,23 @@ class Decoder(nn.Module):
         return x
 
 class IndependentMLP(nn.Module):
-    def __init__(self, input_size, num_concepts, num_classes, num_model_concepts=0):
+    def __init__(self, input_size, num_concepts, num_classes, num_embed_for_concept=8, num_model_concepts=0):
 
         super(IndependentMLP, self).__init__()
-        self.concept_encoder = Encoder(input_size, num_concepts, num_model_concepts=num_model_concepts)
+        self.concept_encoder = Encoder(input_size, num_concepts, num_embed_for_concept=8, num_model_concepts=num_model_concepts)
         self.predictor = MLP(num_concepts + num_model_concepts, num_classes)
 
     def forward(self, x):
-        # This is working on BOTH supervised and unsupervised!
-        c = self.concept_encoder(x)
+        # c1 supervised, c2 unsuperv
+        c1, c2, _ = self.concept_encoder(x)
+        if c2 is not None:
+            c = torch.cat((c1, c2), dim=1)
+        else:
+            c = c1
         y = self.predictor(c)
 
-        return c, y
+        return c1, c2, y
+    
 class End2End(nn.Module):
     def __init__(self,input_size, num_concepts, num_classes, num_embed_for_concept=8, num_model_concepts=0):
 
@@ -191,7 +198,12 @@ class End2End(nn.Module):
 
         c1, c2, linear_weigths = self.concept_encoder(x)
         # print(c1.size(), c2.size())
-        c = torch.cat((c1,c2), dim=1)
+        # Handling zero unsup concepts
+        if c2 is not None:
+            c = torch.cat((c1, c2), dim=1)
+        else:
+            c = c1
+            
         # print(c.size())
         # Classification:
         # Shape -> [0, 1, 2]

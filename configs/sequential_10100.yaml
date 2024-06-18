@@ -1,4 +1,4 @@
-exp_name: sequential_11100
+exp_name: sequential_10100
 seed: 42
 device: cuda:1
 
@@ -12,7 +12,7 @@ DATA:
   n_classes: 2
   n_concepts: 3
   n_embed_concepts: 8
-  n_model_concepts: 5
+  n_model_concepts: 3
 
 REPORTS:
   models_dir: ./models/
@@ -29,7 +29,7 @@ MODEL:
 
 TRAINING:
   num_epochs: 20
-  batch_size: 128
+  batch_size: 256
   learning_rate: 0.001
   warmup_epochs: 5
   early_stopping: 10

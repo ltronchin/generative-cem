@@ -13,8 +13,8 @@ import seaborn as sns
 
 from torch.utils.data import Dataset
 from torchvision import transforms
-import torch
 import torch.nn as nn
+import torch
 # import torchvision.models as models
 from torch.utils.data import DataLoader
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support
@@ -25,6 +25,12 @@ import argparse
 import json
 import yaml
 import pandas as pd
+
+import seaborn as sns
+import matplotlib.pyplot as plt
+from umap import UMAP
+from sklearn.manifold import TSNE
+
 
 from src.utils import util_path
 from src.utils import util_nn
@@ -47,9 +53,12 @@ if __name__ == "__main__":
 #%%
     # args = parse_args()
 
-    cfg_file = '/home/riccardo/Github/generative-cem/configs/sequential_10100.yaml'
+    # cfg_file = '/home/riccardo/Github/generative-cem/configs/sequential_11001.yaml'
+    # cfg_file = '/home/riccardo/Github/generative-cem/configs/sequential_11001.yaml'
+    cfg_file = '/home/riccardo/Github/generative-cem/configs/independent_concept.yaml'
+    # cfg_file = '/home/riccardo/Github/generative-cem/configs/independent_encoder_predictor.yaml'
     # Load JSON file. from the disk.
-    with open(cfg_file) as file:        # args.cfg_file
+    with open(cfg_file) as file:        # to run from console ->  args.cfg_file
         cfg = yaml.load(file, Loader=yaml.FullLoader)
 
     exp_name = cfg['exp_name']
@@ -68,19 +77,13 @@ if __name__ == "__main__":
     n_concepts = cfg_data['n_concepts']
     n_embed_concepts = cfg_data['n_embed_concepts']
     n_model_concepts = cfg_data['n_model_concepts']
-
-    # Directories.
-    cfg_dir = cfg['REPORTS']
-    models_dir = os.path.join(cfg_dir['models_dir'], dataset_name, exp_name)
-    logs_dir = os.path.join(cfg_dir['logs_dir'], dataset_name, exp_name)
-    reports_dir = os.path.join(cfg_dir['reports_dir'], dataset_name, exp_name)
-    util_path.create_dir(models_dir)
-    util_path.create_dir(logs_dir)
-    util_path.create_dir(reports_dir)
-
-    # Save the config file in logs.
-    with open(os.path.join(logs_dir, 'config.yaml'), 'w') as file:
-        yaml.dump(cfg, file)
+    selected_concepts = cfg_data.get('selected_concepts', [])
+    
+    # Adding presence and number of unsup concept in saving files.
+    if n_model_concepts == 0:
+        exp_name = exp_name + '_0_unsup'
+    else:
+        exp_name = exp_name + f'_{int(n_model_concepts)}_unsup'
 
     # Model.
     cfg_model = cfg['MODEL']
@@ -104,7 +107,7 @@ if __name__ == "__main__":
      # Dataset.
     if 'dsprites' in dataset_name:
         datasets = {
-            step: util_data.dSpritesDataset(data_dir=data_dir, fname=f'{file_name}_{step}.{file_type}', use_concepts=True)
+            step: util_data.dSpritesDataset(data_dir=data_dir, fname=f'{file_name}_{step}.{file_type}', use_concepts=True, concept_to_keep=selected_concepts)
             for step in ['train', 'val', 'test']
         }
     else:
@@ -121,7 +124,33 @@ if __name__ == "__main__":
 
     assert n_channels == sample['image'].shape[1], "The number of channels in the dataset is different from the one specified in the arguments."
     assert img_size == sample['image'].shape[2], "The image size in the dataset is different from the one specified in the arguments."
-    assert n_concepts ==  sample['concepts'].shape[1], "The number of concepts in the dataset is different from the one specified in the arguments."
+    
+    # Directories
+    cfg_dir = cfg['REPORTS']
+    if n_concepts != sample['c_to_keep'].shape[1]:
+         raise ValueError("The number of concepts in the model is different from the one specified in the arguments.")
+     
+    elif sample['c_excl'].shape[1] > 0:
+        models_dir = os.path.join(cfg_dir['models_dir'], dataset_name+'_partial', exp_name)
+        logs_dir = os.path.join(cfg_dir['logs_dir'], dataset_name + '_partial', exp_name)
+        reports_dir = os.path.join(cfg_dir['reports_dir'], dataset_name + '_partial', exp_name)
+        
+        print(f'{dataset_name} with only concept number {selected_concepts} selected')
+
+    else:
+        models_dir = os.path.join(cfg_dir['models_dir'], dataset_name + '_full', exp_name)
+        logs_dir = os.path.join(cfg_dir['logs_dir'], dataset_name + '_full', exp_name)
+        reports_dir = os.path.join(cfg_dir['reports_dir'], dataset_name + '_full', exp_name)
+        
+  
+    util_path.create_dir(models_dir)
+    util_path.create_dir(logs_dir)
+    util_path.create_dir(reports_dir)
+    
+        # Save the config file in logs.
+    with open(os.path.join(logs_dir, 'config.yaml'), 'w') as file:
+        yaml.dump(cfg, file)
+
 
     from src.models.models import select_model, Encoder, MLP, IndependentMLP, Decoder, End2End
     # model = models.select_model....
@@ -134,7 +163,7 @@ if __name__ == "__main__":
     # Train - Paul Kalkbrenner
     device = torch.device(device_name if torch.cuda.is_available() else "cpu")
     model = model.to(device)
-#%%
+ #%%
     model, train_history, mse_errors_dict = util_nn.train_model(
         model=model,
         data_loaders=data_loaders,
@@ -148,7 +177,7 @@ if __name__ == "__main__":
         device=device,
         freeze_encoder=freeze_encoder,
     )
-#%%
+  #%%
     # Save history.
     train_history.to_csv(os.path.join(reports_dir, 'train_history.csv'), index=False)
     
@@ -175,29 +204,39 @@ if __name__ == "__main__":
     util_nn.plot_training(train_history, reports_dir, loss_names=['val_concept_loss', 'val_task_loss', 'val_rec_loss', 'val_total_loss'])
     util_nn.plot_reconstructions(reports_dir, model, data_loaders['test'], device, num_images=5)
 
-    mse_data_loaders = {
-    step: DataLoader(datasets[step], batch_size=1, shuffle=True)
-    for step in ['train', 'val', 'test']
-    }
-    # Correlations and mse
-    util_nn.calculate_and_save_distances(model, mse_data_loaders, device, reports_dir)
-    util_nn.plot_mse_values(reports_dir +'/distances.pkl')
-    util_nn.calculate_and_save_correlations(model, mse_data_loaders, device, reports_dir)
-    util_nn.plot_correlations(reports_dir +'/correlations.pkl')
+    if n_model_concepts != 0:
+        mse_data_loaders = {
+        step: DataLoader(datasets[step], batch_size=1, shuffle=True)
+        for step in ['train', 'val', 'test']
+        }
+        
+        util_nn.run_tsne(model, mse_data_loaders, reports_dir)      # (1000, 6)                             (1000, 48) 48 = n_concept * n_emb
+        if n_concepts == n_model_concepts:    
+            util_nn.run_tsne2(model, mse_data_loaders, reports_dir)   # (2000, 3) = (2*n_sample, n_conc)    (2000, 24)
+        util_nn.run_tsne3(model, mse_data_loaders, reports_dir)         # (6000,) = (n_sample*n_con,c)      (12000, 8) = (n_sample*n_conc, n_emb)
+        # Correlations and mse
+        # One thousands sample are passed to the model for this analysis 
+        util_nn.calculate_and_save_distances(model, mse_data_loaders, device='cpu', output_dir=reports_dir)
+        util_nn.plot_mse_values(reports_dir +'/distances.pkl')
+        # util_nn.calculate_and_plot_distance_correlations(reports_dir +'/distances.pkl', reports_dir)
+        util_nn.calculate_and_save_correlations(model, mse_data_loaders, device='cpu', output_dir=reports_dir)
+        util_nn.plot_correlations(reports_dir +'/correlations.pkl')
     
     
-    # # Save MSE erros history to CSV
-    # with open(os.path.join(reports_dir, 'mse_errors.csv'), 'w') as f:
-    #     for epoch in mse_errors_dict:
-    #         for phase in mse_errors_dict[epoch]:
-    #             f.write(f'EPOCH {epoch + 1} - Phase: {phase}\n')
-    #             df = pd.DataFrame(mse_errors_dict[epoch][phase])
-    #             df.to_csv(f, index=False)
-    #             f.write('\n')
-    
-    # Plot MSE for each supervised concepts  vs epochs for visualizations 
-    util_nn.plot_sup_unsup_mse(mse_errors_dict, preds_concepts_size=n_concepts, unsup_concepts_size=n_model_concepts, 
-                           save_dir=reports_dir)
+        # # Save MSE erros history to CSV
+        # with open(os.path.join(reports_dir, 'mse_errors.csv'), 'w') as f:
+        #     for epoch in mse_errors_dict:
+        #         for phase in mse_errors_dict[epoch]:
+        #             f.write(f'EPOCH {epoch + 1} - Phase: {phase}\n')
+        #             df = pd.DataFrame(mse_errors_dict[epoch][phase])
+        #             df.to_csv(f, index=False)
+        #             f.write('\n')
+        
+        # Plot MSE for each supervised concepts  vs epochs for visualizations 
+        # TODO: instead of plotting mse that is, avergaed over the batches, consider to accumulate 
+        # those distances over the epoch X, then retrieve correlations and plot them instead of MSE
+        util_nn.plot_c_excl_unsup_mse_epoch(mse_errors_dict, preds_concepts_size=n_concepts, unsup_concepts_size=n_model_concepts, 
+                            save_dir=reports_dir)
     
     print("May the force be with you!")
 # %%
