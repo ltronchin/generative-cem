@@ -6,6 +6,7 @@ import torch.nn as nn
 import time
 import copy
 import numpy as np
+import re
 from tqdm import tqdm
 import pandas as pd
 from sklearn.metrics import confusion_matrix
@@ -93,7 +94,9 @@ def train_model(model, data_loaders, learning_rate, weights, num_epochs, early_s
         'val_total_loss': []
     }
 
-    epoch_mse_errors_dict = {}
+    # MSE and CORR intiialization
+    epoch_mse_dict = {}
+    epoch_corr_dict = {}
     
     epochs_no_improve = 0
     best_epoch = 0
@@ -103,14 +106,21 @@ def train_model(model, data_loaders, learning_rate, weights, num_epochs, early_s
     for epoch in range(num_epochs):
         print('Epoch {}/{}'.format(epoch, num_epochs - 1))
         print('-' * 10)
-        # Build distances dictionary of dictionaries
-        epoch_mse_errors_dict[epoch] = {
+        # MSE
+        epoch_mse_dict[epoch] = {
+            'train': {'mean': {}, 'std': {}},
+            'val': {'mean': {}, 'std': {}}
+        }
+        # CORR  
+        epoch_corr_dict[epoch] = {
             'train': {'mean': {}, 'std': {}},
             'val': {'mean': {}, 'std': {}}
         }
 
         # Each epoch has a training and validation phase
         for phase in ['train', 'val']:
+            if early_stop:
+                break
             if phase == 'train':
                 model.train()  # Set model to training mode
             else:
@@ -122,8 +132,14 @@ def train_model(model, data_loaders, learning_rate, weights, num_epochs, early_s
             running_lat_loss = 0.0
             running_orth_loss = 0.0
             running_loss = 0.0
+            
+            # MSE
             running_c_excl_unsup_dist = {}
             running_c_excl_unsup_dist_std = {}
+            # CORR
+            running_c_excl_unsup_corr = {}
+            running_c_excl_unsup_corr_std = {}
+            
             counter = 0
             # Iterate over data.
             for sample in tqdm(data_loaders[phase]):
@@ -200,22 +216,31 @@ def train_model(model, data_loaders, learning_rate, weights, num_epochs, early_s
                 # No grad needed for measure distances between superv Cs and unsuperv Cs                   
                 with torch.no_grad():     
                     if unsup_concepts is not None:
-                    # Calculate pairwise MSE (average over batch dimension)
+                    # Calculate pairwise MSE (average over batch dimension) on CORR
                         for i in range(c_excl.size(1)):
                                 for j in range(unsup_concepts.size(1)):
                                     if (i, j) not in running_c_excl_unsup_dist:
+                                        # MSE
                                         running_c_excl_unsup_dist[(i, j)] = []
                                         running_c_excl_unsup_dist_std[(i, j)] = []
+                                        # CORR
+                                        running_c_excl_unsup_corr[(i, j)] = []
+                                        running_c_excl_unsup_corr_std[(i, j)] = []
+
+                                    # MSE
                                     mse_batch = F.mse_loss(c_excl[:, i], unsup_concepts[:, j], reduction='none').cpu().detach().numpy()
-                                    # print(f'MSE_pre_mean: {np.shape(mse_batch)}')
                                     mse_mean = np.mean(mse_batch, axis = 0)
                                     mse_std = np.std(mse_batch, axis=0)
-                                    # if counter % 100 == 0:
-                                    #     if j == 0:
-                                    #         print(f'KEY: ({i}, 0)  -- > MSE_mean: {mse_mean}\nKEY: ({i}, 0)  -- > MSE_std: {mse_std}')
-                                    
+                                 
                                     running_c_excl_unsup_dist[(i, j)].append(mse_mean)
-                                    running_c_excl_unsup_dist_std[(i, j)].append(mse_std)                                 
+                                    running_c_excl_unsup_dist_std[(i, j)].append(mse_std)     
+                                    
+                                    # CORR
+                                    c_excl_i = c_excl[:, i].cpu().detach().numpy()
+                                    unsup_concepts_j = unsup_concepts[:, j].cpu().detach().numpy()
+
+                                    corr_batch, _ = pearsonr(c_excl_i, unsup_concepts_j)
+                                    running_c_excl_unsup_corr[(i, j)].append(corr_batch)                           
 
                 # Statistics
                 running_task_loss += task_loss.item()
@@ -238,6 +263,7 @@ def train_model(model, data_loaders, learning_rate, weights, num_epochs, early_s
             if unsup_concepts is not None:
                 # Average over total number of batches
                 for key in running_c_excl_unsup_dist:
+                    # MSE
                     # print(f'KEY:  {key}')
                     running_c_excl_unsup_dist[key] = np.mean(running_c_excl_unsup_dist[key])
                     # print(f'RUN_SUP_UNSUP_MEAN_EPOCH: {running_c_excl_unsup_dist[key]}')
@@ -245,8 +271,15 @@ def train_model(model, data_loaders, learning_rate, weights, num_epochs, early_s
                     running_c_excl_unsup_dist_std[key] = np.mean(running_c_excl_unsup_dist_std[key])
                     # print(f'RUN_SUP_UNSUP_STD_EPOCH: {running_c_excl_unsup_dist_std[key]}')
                     
-                epoch_mse_errors_dict[epoch][phase]['mean'] = running_c_excl_unsup_dist
-                epoch_mse_errors_dict[epoch][phase]['std'] = running_c_excl_unsup_dist_std
+                    running_c_excl_unsup_corr[key] = np.mean(running_c_excl_unsup_corr[key])
+                    running_c_excl_unsup_corr_std[key] = np.std(running_c_excl_unsup_corr[key])
+                
+                # MSE   
+                epoch_mse_dict[epoch][phase]['mean'] = running_c_excl_unsup_dist
+                epoch_mse_dict[epoch][phase]['std'] = running_c_excl_unsup_dist_std
+                # CORR
+                epoch_corr_dict[epoch][phase]['mean'] = running_c_excl_unsup_corr
+                epoch_corr_dict[epoch][phase]['std'] = running_c_excl_unsup_corr_std
 
                                 
             # update history
@@ -288,12 +321,9 @@ def train_model(model, data_loaders, learning_rate, weights, num_epochs, early_s
                         epochs_no_improve += 1
                         # Trigger early stopping
                         if epochs_no_improve >= early_stopping:
-                            print(f'\nEarly Stopping! Total epochs: {epoch}%')
+                            print(f'\nEarly Stopping! Total epochs: {epoch}')
                             early_stop = True
                             break
-
-            if early_stop:
-                break
 
     time_elapsed = time.time() - since
     print('Training complete in {:.0f}m {:.0f}s'.format(time_elapsed // 60, time_elapsed % 60))
@@ -310,7 +340,7 @@ def train_model(model, data_loaders, learning_rate, weights, num_epochs, early_s
     # Format history
     history = pd.DataFrame.from_dict(history, orient='index').transpose()
 
-    return model, history, epoch_mse_errors_dict
+    return model, history, epoch_mse_dict, epoch_corr_dict
 #%%
 
 def evaluate(model, data_loader, device):
@@ -424,12 +454,13 @@ def compute_metrics(y_test_real, y_pred):
 
     return accuracy, precision, recall, specificity, f1, g_mean
 
-def plot_training(history, plot_training_dir, loss_names, plot_name_loss='Loss', plot_name_acc='Acc'):
+def plot_training(history, plot_training_dir, loss_names, plot_name_loss='Loss', plot_name_acc='Acc', precision = 0.001):
 
     # Training results Loss function
     plt.figure()
     for c in loss_names:
-        plt.plot(history[c], label=c)
+        if abs(history[c].iloc[-1] - history[c].iloc[0]) >= precision:
+            plt.plot(history[c], label=c)
     plt.legend()
     plt.xlabel('Epochs')
     plt.ylabel('Losses')
@@ -501,40 +532,40 @@ def mse_error_pairwise_batch(tensor1, tensor2):
     
     return errors.mean(dim=0)
     
-def plot_c_excl_unsup_mse_epoch(epoch_mse_errors_dict, preds_concepts_size, unsup_concepts_size, save_dir):
+def plot_c_excl_unsup_mse_epoch(epoch_mse_errors_dict, preds_concepts_size, unsup_concepts_size, save_dir, data_type = 'corr'):
     num_epochs = len(epoch_mse_errors_dict)
     
     for i in range(preds_concepts_size):
         plt.figure()
         
         for j in range(unsup_concepts_size):
-            train_means = [epoch_mse_errors_dict[epoch]['train']['mean'].get((i, j), None) for epoch in range(num_epochs)]
-            val_means = [epoch_mse_errors_dict[epoch]['val']['mean'].get((i, j), None) for epoch in range(num_epochs)]
+            train_means = [epoch_mse_errors_dict[epoch]['train']['mean'].get((i, j), 0 ) for epoch in range(num_epochs)]
+            val_means = [epoch_mse_errors_dict[epoch]['val']['mean'].get((i, j), 0) for epoch in range(num_epochs)]
             
-            train_stds = [epoch_mse_errors_dict[epoch]['train']['std'].get((i, j), None) for epoch in range(num_epochs)]
-            val_stds = [epoch_mse_errors_dict[epoch]['val']['std'].get((i, j), None) for epoch in range(num_epochs)]
+            train_stds = [epoch_mse_errors_dict[epoch]['train']['std'].get((i, j),0) for epoch in range(num_epochs)]
+            val_stds = [epoch_mse_errors_dict[epoch]['val']['std'].get((i, j), 0) for epoch in range(num_epochs)]
             
             # Plot mean values with error bars (standard deviation)
             plt.errorbar(range(1, num_epochs + 1), train_means, yerr=train_stds, label=f'unsup C{j + 1} Train', linestyle='-', color=f'C{j}')
             plt.errorbar(range(1, num_epochs + 1), val_means, yerr=val_stds, label=f'unsup C{j + 1} Val', linestyle='--', color=f'C{j}')
         
         plt.xlabel('Epochs')
-        plt.ylabel('MSE')
-        plt.title(f'Predicted Concept {i + 1}')
+        plt.ylabel('Pearson Correlation' if data_type == 'corr' else data_type)
+        plt.title(f'Excluded concept {i + 1}')
         plt.legend(title='Legend:', loc='best', fontsize='small')
         
         # Additional text box for clarity
         plt.text(0.5, 0.92, 'Continuous line: Train\n-- line: Validation', horizontalalignment='center', 
-                 verticalalignment='center', fontsize='small',
+                 verticalalignment='center', fontsize=4,
                  transform=plt.gca().transAxes, bbox=dict(facecolor='white', alpha=0.5))
         
         # Save and show the plot
-        plt.savefig(os.path.join(save_dir, f'mse_epoch_preds_concept_{i + 1}.png'))
+        plt.savefig(os.path.join(save_dir, f'{data_type}_epoch_preds_concept_{i + 1}.png'))
         plt.show()
         plt.close()
 
 #################################################### correlations and distances post taining ############################
-
+#%%
 def calculate_and_save_distances(model, data_loaders, device, output_dir):
     model.eval()  # Set model to evaluation mode
     
@@ -546,18 +577,26 @@ def calculate_and_save_distances(model, data_loaders, device, output_dir):
             if count >= 1000:
                 break
             
-            imgs, concepts = sample['image'].to(device), sample['c_to_keep'].to(device)
+            imgs, excl_concepts = sample['image'].to(device), sample['c_excl'].to(device)
 
             with torch.no_grad():
-                preds_concepts, unsup_concepts, _, _, _, _ = model(imgs)
+                if type(model).__name__ == 'End2End':
+                    preds_concepts, unsup_concepts, _, _, _, _ = model(imgs)
+                elif type(model).__name__ == 'IndependentMLP':
+                    preds_concepts, unsup_concepts, _ = model(imgs)
+                elif type(model).__name__ == 'Encoder':
+                    preds_concepts, unsup_concepts,_ = model(imgs)
+
+                else:
+                    raise ValueError('Model type not found!')
                 # print(f'SUP_VS_UNSUP_CONCEPT:\n{preds_concepts}\n{unsup_concepts}')
 
-                sample_distances = np.zeros((preds_concepts.size(1), unsup_concepts.size(1)))
+                sample_distances = np.zeros((excl_concepts.size(1), unsup_concepts.size(1)))
 
-                for i in range(preds_concepts.size(1)):
+                for i in range(excl_concepts.size(1)):
                     for j in range(unsup_concepts.size(1)):
                         # Batch size = 1 so reduction is none
-                        mse_value = F.mse_loss(preds_concepts[:, i], unsup_concepts[:, j], reduction='none').item()
+                        mse_value = F.mse_loss(excl_concepts[:, i], unsup_concepts[:, j], reduction='none').item()
                         sample_distances[i, j] = mse_value
 
                 # print(f'SUP_CONCEPTS_VS_UNSUP_CONC_1:\n{sample_distances[0,1]}, {sample_distances[1,1]}, {sample_distances[2,1]}')
@@ -600,7 +639,7 @@ def plot_mse_values(distance_file_path, save_dir=None):
         
         # Calculate mean MSE values across all samples for the current prediction concept
         mean_mse_values = mse_values.mean(axis=0)
-        print(mean_mse_values)
+        print(f'Mean over 1000 samples of distances between concept {i+1} and the {n_unsup_concepts} Unsupervised:\n{mean_mse_values}')
         
         x_labels = [f'Unsup C{j+1}' for j in range(n_unsup_concepts)]
         
@@ -624,11 +663,12 @@ def plot_mse_values(distance_file_path, save_dir=None):
     return print(f'Plot saved to {save_dir}')
     
     
-def calculate_and_save_correlations(model, data_loaders, device, output_dir):
+def calculate_and_save_correlations(model, data_loaders, device, output_dir, sup_unsup=False):
     model.eval()  # Set model to evaluation mode
 
     preds_concepts_list = []
     unsup_concepts_list = []
+    excl_concepts_list = []
 
     for phase in ['train', 'val', 'test']:
         count = 0
@@ -636,38 +676,55 @@ def calculate_and_save_correlations(model, data_loaders, device, output_dir):
             if count >= 1000:
                 break
             
-            imgs, concepts = sample['image'].to(device), sample['c_to_keep'].to(device)
+            imgs, excl_concepts = sample['image'].to(device), sample['c_excl'].to(device)
 
             with torch.no_grad():
-                preds_concepts, unsup_concepts, _, _, _, _ = model(imgs)
+                if type(model).__name__ == 'End2End':
+                    preds_concepts, unsup_concepts, _, _, _, _ = model(imgs)
+                elif type(model).__name__ == 'IndependentMLP':
+                    preds_concepts, unsup_concepts, _ = model(imgs)
+                elif type(model).__name__ == 'Encoder':
+                    preds_concepts, unsup_concepts,_ = model(imgs)
+                else:
+                    raise ValueError('Model type not found!')
 
                 preds_concepts_list.append(preds_concepts.cpu().numpy())
                 unsup_concepts_list.append(unsup_concepts.cpu().numpy())
+                excl_concepts_list.append(excl_concepts)
             
             count += 1
 
     preds_concepts_array = np.concatenate(preds_concepts_list, axis=0)
     unsup_concepts_array = np.concatenate(unsup_concepts_list, axis=0)
+    excl_concepts_array = np.concatenate(excl_concepts_list, axis=0)
+
+    # If varaible true change to perform correlation between sup and unsup
+    if sup_unsup:
+        excl_concepts_array = preds_concepts_array
 
     n_pred_concepts = preds_concepts_array.shape[1]
     n_unsup_concepts = unsup_concepts_array.shape[1]
+    n_excl = excl_concepts_array.shape[1]
 
     correlations = {}
-
-    for i in range(n_pred_concepts):
+        
+    for i in range(n_excl):
         pearson_values = []
         spearman_values = []
         for j in range(n_unsup_concepts):
             # Pearson correlation
-            pearson_corr, _ = pearsonr(preds_concepts_array[:, i], unsup_concepts_array[:, j])
+            pearson_corr, _ = pearsonr(excl_concepts_array[:, i], unsup_concepts_array[:, j])
             # Spearman correlation
-            spearman_corr, _ = spearmanr(preds_concepts_array[:, i], unsup_concepts_array[:, j])
+            spearman_corr, _ = spearmanr(excl_concepts_array[:, i], unsup_concepts_array[:, j])
             pearson_values.append(pearson_corr)
             spearman_values.append(spearman_corr)
         correlations[i] = {'pearson': pearson_values, 'spearman': spearman_values}
 
     # Save correlations to file
-    correlation_file_path = os.path.join(output_dir, 'correlations.pkl')
+    if sup_unsup:
+        correlation_file_path  = os.path.join(output_dir, 'correlations_sup_unsup.pkl')
+    else:
+        correlation_file_path = os.path.join(output_dir, 'correlations_excl_unsup.pkl')
     with open(correlation_file_path, 'wb') as f:
         pickle.dump(correlations, f)
 
@@ -702,9 +759,9 @@ def plot_correlations(correlation_file_path, save_dir = None, title = None, name
         axs[i].bar(x - bar_width/2, pearson_values, bar_width, label='Pearson', color='blue')
         axs[i].bar(x + bar_width/2, spearman_values, bar_width, label='Spearman', color='orange')
         if title == None:
-            axs[i].set_title(f'Correlations for Preds Concept {i+1}')
+            axs[i].set_title(f'Correlations for Concept {i+1}')
         else: 
-            axs[i].set_title(f'{title} for Preds Concept {i+1}')
+            axs[i].set_title(f'{title} for Concept {i+1}')
         axs[i].set_ylabel('Correlation Coefficient')
         axs[i].set_xticks(x)
         axs[i].set_xticklabels(x_labels, rotation=45, ha='right')
@@ -713,51 +770,13 @@ def plot_correlations(correlation_file_path, save_dir = None, title = None, name
 
     plt.tight_layout()
     if name == None:
-        plt.savefig(os.path.join(save_dir, f'corr_pred_concepts_vs_unsup_concepts.png'))
+        name = re.search(r'correlations_(.*?)\.pkl', correlation_file_path)
+        # print(name.group(1))
+        plt.savefig(os.path.join(save_dir, f"corr_{name.group(1)}.png"))
     else:
         plt.savefig(os.path.join(save_dir, f'{name}.png'))
     plt.show()
     plt.close()
-
-def calculate_and_plot_distance_correlations(distance_file_path, output_dir):
-    with open(distance_file_path, 'rb') as f:
-        distance_dict = pickle.load(f)
-
-    # Prepare lists to collect distances for correlation calculation
-    preds_concepts_distances = []
-    unsup_concepts_distances = []
-
-    for distances in distance_dict.values():
-        print(distances)
-        preds_concepts_distances.append(distances)
-        unsup_concepts_distances.append(distances)
-
-    preds_concepts_array = np.concatenate(preds_concepts_distances, axis=0)
-    unsup_concepts_array = np.concatenate(unsup_concepts_distances, axis=0)
-
-    n_pred_concepts = preds_concepts_array.shape[1]
-    n_unsup_concepts = unsup_concepts_array.shape[1]
-
-    correlations = {}
-
-    for i in range(n_pred_concepts):
-        pearson_values = []
-        spearman_values = []
-        for j in range(n_unsup_concepts):
-            pearson_corr, _ = pearsonr(preds_concepts_array[:, i], unsup_concepts_array[:, j])
-            spearman_corr, _ = spearmanr(preds_concepts_array[:, i], unsup_concepts_array[:, j])
-            pearson_values.append(pearson_corr)
-            spearman_values.append(spearman_corr)
-        correlations[i] = {'pearson': pearson_values, 'spearman': spearman_values}
-
-    correlation_file_path = os.path.join(output_dir, 'correlations_between_distances.pkl')
-    with open(correlation_file_path, 'wb') as f:
-        pickle.dump(correlations, f)
-
-    print(f'Correlations saved to {correlation_file_path}')
-
-    plot_correlations(correlation_file_path, output_dir, title='Distances Correlations', name='corr_of_mse_sup_vs_unsup')
-    
     
 #############################################################################################      
 ############################### RICCARDO  ORTHOGONALITY ########################
@@ -901,18 +920,25 @@ def run_tsne(model, data_loader, savedir=None, device='cpu', perplexity=30, n_it
         weights_list = []
         with torch.no_grad():
             for idx, sample in tqdm(enumerate(data_loader[phase]), desc=f'Extracting concepts from {phase}'):
-                if idx == 0:
-                    imgs, concepts = sample['image'].to(device), sample['c_to_keep'].to(device)
-                    preds_concepts, unsup_concepts, _, _, _, linear_weights = model(imgs)
-                    n_sup = preds_concepts.size(1)
-                    n_unsup = unsup_concepts.size(1)
-                    n_emb = linear_weights[0].shape[1]
-                    
-                if idx >= 1000:
-                    break
-                  
+                
                 imgs, concepts = sample['image'].to(device), sample['c_to_keep'].to(device)
-                preds_concepts, unsup_concepts, preds_task, _, _, linear_weights = model(imgs)
+                # Get dimensions
+                # if idx == 0:                                       
+                    # n_sup = preds_concepts.size(1)
+                    # n_unsup = unsup_concepts.size(1)
+                    # n_emb = linear_weights[0].shape[1]
+                
+                if idx >= 1000:
+                
+                    break
+                if type(model).__name__ == 'End2End':
+                    preds_concepts, unsup_concepts, preds_task, preds_img_tilde, preds_concepts_tilde, linear_weights = model(imgs)
+                elif type(model).__name__ == 'IndependentMLP':
+                    preds_concepts, unsup_concepts, preds_task = model(imgs)
+                elif type(model).__name__ == 'Encoder':
+                    preds_concepts, unsup_concepts, linear_weights = model(imgs)
+                else:
+                    raise ValueError('Model type not found!')
                 
                 # Unique label for concepts
                 label_list.append(np.argmax(preds_task.numpy()))
@@ -1012,35 +1038,46 @@ def run_tsne2(model, data_loader, savedir=None, device='cpu', perplexity=30, n_i
         
         with torch.no_grad():
             for idx, sample in tqdm(enumerate(data_loader[phase]), desc=f'Extracting concepts from {phase}'):
-                # Get dimensions
-                if idx == 0:
-                    imgs, concepts = sample['image'].to(device), sample['c_to_keep'].to(device)
-                    preds_concepts, unsup_concepts, _, _, _, linear_weights = model(imgs)
-                    n_sup = preds_concepts.size(1)
-                    n_unsup = unsup_concepts.size(1)
-                    if n_sup != n_unsup:
-                        raise ValueError('Number of supervised and unsupervised concepts not equal!\n\
-                                         This TSNE overimpose unsupervised and supervised spaces as different samples')
+                
+                imgs, concepts = sample['image'].to(device), sample['c_to_keep'].to(device)
                     
                 if idx >= 1000:
                     break
                 
-                imgs, concepts = sample['image'].to(device), sample['c_to_keep'].to(device)
-                preds_concepts, unsup_concepts, preds_task, _, _, linear_weights = model(imgs)
+                if type(model).__name__ == 'End2End':
+                    preds_concepts, unsup_concepts, preds_task, preds_img_tilde, preds_concepts_tilde, linear_weights = model(imgs)
+                elif type(model).__name__ == 'IndependentMLP':
+                    preds_concepts, unsup_concepts, preds_task = model(imgs)
+                    # Creating missing variables by casting them to original value for conserving loss calculation
+                    preds_img_tilde = imgs
+                    preds_concepts_tilde = preds_concepts
+                elif type(model).__name__ == 'Encoder':
+                    preds_concepts, unsup_concepts, linear_weights = model(imgs)
+                    # Creating missing variables for losses by casting them to original value for conserving loss calculation
+                    preds_task = torch.zeros((imgs.size(0), 2), dtype=torch.float32, device=device)
+                    preds_img_tilde = imgs
+                    preds_concepts_tilde = preds_concepts
+                else:
+                    raise ValueError('Model type not found!')
                 
                 # Unique label for concepts
                 label_list.append(np.argmax(preds_task.numpy()))
                 
                 # Supervised concepts and weights
                 sup_concept_list.append(preds_concepts.cpu().numpy())
-                preds_concepts_weights = np.vstack([weight.cpu().numpy() for weight in linear_weights[:n_sup]]).reshape(-1)   # 1D (n_sup*16,)
+                preds_concepts_weights = np.vstack([weight.cpu().numpy() for weight in linear_weights[:preds_concepts.size(1)]]).reshape(-1)   # 1D (n_sup*16,)
                 sup_weights_list.append(preds_concepts_weights)      # len(list) = idx  list[x].shape = (n_sup * 16,)
                 
                 # Unsupervised concepts and weights
                 unsup_concept_list.append(unsup_concepts.cpu().numpy())             
-                unsup_concepts_weights = np.vstack([weight.cpu().numpy() for weight in linear_weights[n_sup:]]).reshape(-1)    # 1D = (n_unsup*16,)
+                unsup_concepts_weights = np.vstack([weight.cpu().numpy() for weight in linear_weights[preds_concepts.size(1):]]).reshape(-1)    # 1D = (n_unsup*16,)
                 unsup_weights_list.append(unsup_concepts_weights)      # len(list) = idx  -> list[x].shape = (n_unsup * 16,)
-
+        
+        n_sup = preds_concepts.size(1)
+        n_unsup = unsup_concepts.size(1)
+        if n_sup != n_unsup:
+            raise ValueError('Number of supervised and unsupervised concepts not equal!\n\
+                                This TSNE overimpose unsupervised and supervised spaces as different samples')
         # Stack supervised and unsupervised concepts
         sup_concept_list = np.vstack(sup_concept_list) 
         unsup_concept_list = np.vstack(unsup_concept_list) 
@@ -1061,10 +1098,8 @@ def run_tsne2(model, data_loader, savedir=None, device='cpu', perplexity=30, n_i
         print(f"sup_concept_list shape: {sup_concept_list.shape}")
         print(f"unsup_concept_list shape: {unsup_concept_list.shape}")
         print(f"combined_concepts shape: {combined_concepts.shape}")
-        print(f"combined_shapes length: {len(combined_shapes)}")
-        print(f"combined_labels length: {label_list[0:10]}")
+        print(f"combined_labels unique: {np.unique(label_list)}")
         print(f"combined_weights shape: {combined_weights.shape}")
-        print(f"combined_weight_shapes length: {len(combined_shapes)}")
 
         # Perform t-SNE for concepts
         tsne = TSNE(n_components=2, perplexity=perplexity, n_iter=n_iter, random_state=42)
@@ -1201,18 +1236,27 @@ def run_tsne3(model, data_loader, savedir=None, device='cpu', perplexity=30, n_i
         
         with torch.no_grad():
             for idx, sample in tqdm(enumerate(data_loader[phase]), desc=f'Extracting concepts from {phase}'):
-                # Get dimensions
-                if idx == 0:
-                    imgs, concepts = sample['image'].to(device), sample['c_to_keep'].to(device)
-                    preds_concepts, unsup_concepts, _, _, _, linear_weights = model(imgs)
-                    n_sup = preds_concepts.size(1)
-                    n_unsup = unsup_concepts.size(1)
+                
+                imgs, concepts = sample['image'].to(device), sample['c_to_keep'].to(device)
                     
                 if idx >= 1000:
                     break
                 
-                imgs, concepts = sample['image'].to(device), sample['c_to_keep'].to(device)
-                preds_concepts, unsup_concepts, preds_task, _, _, linear_weights = model(imgs)
+                if type(model).__name__ == 'End2End':
+                    preds_concepts, unsup_concepts, preds_task, preds_img_tilde, preds_concepts_tilde, linear_weights = model(imgs)
+                elif type(model).__name__ == 'IndependentMLP':
+                    preds_concepts, unsup_concepts, preds_task = model(imgs)
+                    # Creating missing variables by casting them to original value for conserving loss calculation
+                    preds_img_tilde = imgs
+                    preds_concepts_tilde = preds_concepts
+                elif type(model).__name__ == 'Encoder':
+                    preds_concepts, unsup_concepts, linear_weights = model(imgs)
+                    # Creating missing variables for losses by casting them to original value for conserving loss calculation
+                    preds_task = torch.zeros((imgs.size(0), 2), dtype=torch.float32, device=device)
+                    preds_img_tilde = imgs
+                    preds_concepts_tilde = preds_concepts
+                else:
+                    raise ValueError('Model type not found!')
                 
                 # Unique label for concepts
                 label_list.append(np.argmax(preds_task.numpy()))
@@ -1221,13 +1265,15 @@ def run_tsne3(model, data_loader, savedir=None, device='cpu', perplexity=30, n_i
                 concept_list.append(torch.cat((preds_concepts, unsup_concepts), dim=1).cpu().numpy()) 
                 
                 # Supervised weights
-                preds_concepts_weights = np.vstack([weight.cpu().numpy() for weight in linear_weights[:n_sup]])   # 1D (n_sup*16,)
+                preds_concepts_weights = np.vstack([weight.cpu().numpy() for weight in linear_weights[:preds_concepts.size(1)]])   # 1D (n_sup*16,)
                 sup_weights_list.append(preds_concepts_weights)      # len(list) = idx  list[x].shape = (n_sup * 16,)
                 
                 # Unsupervise weights            
-                unsup_concepts_weights = np.vstack([weight.cpu().numpy() for weight in linear_weights[n_sup:]])   # 1D = (n_unsup*16,)
+                unsup_concepts_weights = np.vstack([weight.cpu().numpy() for weight in linear_weights[preds_concepts.size(1):]])   # 1D = (n_unsup*16,)
                 unsup_weights_list.append(unsup_concepts_weights)      # len(list) = idx  -> list[x].shape = (n_unsup * 16,)
 
+        n_sup = preds_concepts.size(1)
+        n_unsup = unsup_concepts.size(1)
         # Stack supervised and unsupervised concepts
         concept_list = np.vstack(concept_list).reshape(-1)
         

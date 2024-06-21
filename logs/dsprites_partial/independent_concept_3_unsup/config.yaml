@@ -24,7 +24,7 @@ TRAINING:
   batch_size: 128
   early_stopping: 10
   learning_rate: 0.0005
-  num_epochs: 50
+  num_epochs: 8
   warmup_epochs: 5
   weight_concept_loss: 1.0
   weight_lat_loss: 0.0

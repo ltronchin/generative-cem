@@ -24,7 +24,7 @@ sns.set(style="whitegrid", font_scale=1.6, rc={"figure.figsize": (column_width_i
 
 def select_model(exp_name, input_size, num_concepts, num_embed_for_concept, num_model_concepts, num_classes):
     if 'independent_concept' in exp_name:
-        return Encoder(input_size, num_concepts, num_embed_for_concept=8, num_model_concepts=num_model_concepts)
+        return Encoder(input_size, num_concepts, num_embed_for_concept=num_embed_for_concept, num_model_concepts=num_model_concepts)
     elif 'independent_predictor' in exp_name:
         return MLP(num_concepts, num_classes)
     elif 'independent_decoder' in exp_name:
@@ -71,7 +71,6 @@ class Encoder(nn.Module):
             in_channels = out_channels
 
         self.fc_input_features = self._calculate_fc_input_features()
-        # self.fc = nn.Linear(self.fc_input_features, num_concepts)
         self.fc_adjust = nn.Linear(self.fc_input_features, (num_concepts + num_model_concepts) * num_embed_for_concept)
         
         self.num_concepts = num_concepts

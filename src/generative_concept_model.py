@@ -53,6 +53,7 @@ if __name__ == "__main__":
 #%%
     # args = parse_args()
 
+    # cfg_file = '/home/riccardo/Github/generative-cem/configs/sequential_00100.yaml'
     # cfg_file = '/home/riccardo/Github/generative-cem/configs/sequential_11001.yaml'
     # cfg_file = '/home/riccardo/Github/generative-cem/configs/sequential_11001.yaml'
     cfg_file = '/home/riccardo/Github/generative-cem/configs/independent_concept.yaml'
@@ -164,7 +165,7 @@ if __name__ == "__main__":
     device = torch.device(device_name if torch.cuda.is_available() else "cpu")
     model = model.to(device)
  #%%
-    model, train_history, mse_errors_dict = util_nn.train_model(
+    model, train_history, mse_epoch_dict, corr_epoch_dict = util_nn.train_model(
         model=model,
         data_loaders=data_loaders,
         learning_rate=learning_rate,
@@ -200,9 +201,13 @@ if __name__ == "__main__":
     np.save(os.path.join(outdir, 'c_test.npy'), c_test)
 
     # Plot.
-    util_nn.plot_training(train_history, reports_dir, loss_names=['train_concept_loss', 'train_task_loss', 'train_rec_loss', 'train_lat_loss', 'train_total_loss'])
-    util_nn.plot_training(train_history, reports_dir, loss_names=['val_concept_loss', 'val_task_loss', 'val_rec_loss', 'val_total_loss'])
-    util_nn.plot_reconstructions(reports_dir, model, data_loaders['test'], device, num_images=5)
+    util_nn.plot_training(train_history, reports_dir, 
+                          loss_names=['train_concept_loss', 'train_task_loss', 'train_rec_loss', 'train_lat_loss', 'train_orth_loss','train_total_loss'], 
+                          plot_name_loss='Train Losses')
+    util_nn.plot_training(train_history, reports_dir, loss_names=['val_concept_loss', 'val_task_loss', 'val_rec_loss', 'val_orth_loss', 'val_total_loss'],
+                          plot_name_loss='Val Losses')
+    if hasattr(model, 'concept_decoder'):
+        util_nn.plot_reconstructions(reports_dir, model, data_loaders['test'], device, num_images=5)
 
     if n_model_concepts != 0:
         mse_data_loaders = {
@@ -213,14 +218,17 @@ if __name__ == "__main__":
         util_nn.run_tsne(model, mse_data_loaders, reports_dir)      # (1000, 6)                             (1000, 48) 48 = n_concept * n_emb
         if n_concepts == n_model_concepts:    
             util_nn.run_tsne2(model, mse_data_loaders, reports_dir)   # (2000, 3) = (2*n_sample, n_conc)    (2000, 24)
-        util_nn.run_tsne3(model, mse_data_loaders, reports_dir)         # (6000,) = (n_sample*n_con,c)      (12000, 8) = (n_sample*n_conc, n_emb)
+        util_nn.run_tsne3(model, mse_data_loaders, reports_dir)         # (6000,) = (n_sample*n_con,c)      (6000, 8) = (n_sample*n_conc, n_emb)
         # Correlations and mse
         # One thousands sample are passed to the model for this analysis 
         util_nn.calculate_and_save_distances(model, mse_data_loaders, device='cpu', output_dir=reports_dir)
         util_nn.plot_mse_values(reports_dir +'/distances.pkl')
-        # util_nn.calculate_and_plot_distance_correlations(reports_dir +'/distances.pkl', reports_dir)
-        util_nn.calculate_and_save_correlations(model, mse_data_loaders, device='cpu', output_dir=reports_dir)
-        util_nn.plot_correlations(reports_dir +'/correlations.pkl')
+        
+        util_nn.calculate_and_save_correlations(model, mse_data_loaders, device='cpu', output_dir=reports_dir, sup_unsup=False) 
+        util_nn.plot_correlations(reports_dir +'/correlations_excl_unsup.pkl')
+        
+        util_nn.calculate_and_save_correlations(model, mse_data_loaders, device='cpu', output_dir=reports_dir, sup_unsup=True) 
+        util_nn.plot_correlations(reports_dir +'/correlations_sup_unsup.pkl')
     
     
         # # Save MSE erros history to CSV
@@ -235,7 +243,9 @@ if __name__ == "__main__":
         # Plot MSE for each supervised concepts  vs epochs for visualizations 
         # TODO: instead of plotting mse that is, avergaed over the batches, consider to accumulate 
         # those distances over the epoch X, then retrieve correlations and plot them instead of MSE
-        util_nn.plot_c_excl_unsup_mse_epoch(mse_errors_dict, preds_concepts_size=n_concepts, unsup_concepts_size=n_model_concepts, 
+        util_nn.plot_c_excl_unsup_mse_epoch(mse_epoch_dict, preds_concepts_size=n_concepts, unsup_concepts_size=n_model_concepts, 
+                            save_dir=reports_dir, data_type='MSE')
+        util_nn.plot_c_excl_unsup_mse_epoch(corr_epoch_dict, preds_concepts_size=n_concepts, unsup_concepts_size=n_model_concepts, 
                             save_dir=reports_dir)
     
     print("May the force be with you!")
