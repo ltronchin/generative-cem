@@ -14,6 +14,7 @@ import torch
 import torchvision.models as models
 
 
+
 column_width_pt = 516.0
 pt_to_inch = 1 / 72.27
 column_width_inches = column_width_pt * pt_to_inch
@@ -34,7 +35,7 @@ def select_model(exp_name, input_size, num_concepts, num_embed_for_concept, num_
     elif 'joint' in exp_name:
         return End2End(input_size, num_concepts, num_classes, num_embed_for_concept, num_model_concepts)
     elif 'independet_encoder_predictor':
-        return IndependentMLP(input_size, num_concepts, num_classes, num_embed_for_concept=8, num_model_concepts=num_model_concepts)
+        return IndependentMLP(input_size, num_concepts, num_classes, num_embed_for_concept=num_embed_for_concept, num_model_concepts=num_model_concepts)
     else:
         raise ValueError("Invalid experiment name.")
 
@@ -53,12 +54,19 @@ class MLP(nn.Module):
         return output
 #%%
 class Encoder(nn.Module):
-    def __init__(self, input_size, num_concepts, num_embed_for_concept=16, num_model_concepts = 0, feature_sizes=(16, 32, 64, 128)):
+    def __init__(self, input_size, num_concepts, num_embed_for_concept=16, num_model_concepts = 0, feature_sizes=(16, 32, 64, 128), skip_connection = False):
         super(Encoder, self).__init__()
         
         self.input_size = input_size
-        self.conv_layers = nn.ModuleList()
         self.feature_sizes = feature_sizes
+        self.skip_connection = skip_connection
+        
+        self.num_concepts = num_concepts
+        self.num_model_concepts = num_model_concepts
+        self.num_embed_for_concept = num_embed_for_concept
+        
+        self.conv_layers = nn.ModuleList()
+        self.linear_layers = nn.ModuleList()
 
         in_channels = input_size[0]
         for out_channels in feature_sizes:
@@ -71,16 +79,9 @@ class Encoder(nn.Module):
             in_channels = out_channels
 
         self.fc_input_features = self._calculate_fc_input_features()
-        self.fc_adjust = nn.Linear(self.fc_input_features, (num_concepts + num_model_concepts) * num_embed_for_concept)
-        
-        self.num_concepts = num_concepts
-        self.num_model_concepts = num_model_concepts
-        self.num_embed_for_concept = num_embed_for_concept
-        
-        self.linear_layers = nn.ModuleList()
-        num_linear_layers = num_concepts + num_model_concepts      
-        
-        for _ in range(num_linear_layers):
+        self.fc_adjust = nn.Linear(self.fc_input_features, (num_concepts + num_model_concepts) * num_embed_for_concept)     
+                         
+        for _ in range(num_concepts + num_model_concepts):
             self.linear_layers.append(nn.Linear(num_embed_for_concept, 1))
 
     def _calculate_fc_input_features(self):
@@ -97,9 +98,9 @@ class Encoder(nn.Module):
         for conv_layer in self.conv_layers:
             x = conv_layer(x)
         # Flatten the output
-        x = torch.flatten(x, start_dim=1)
+        encod_flat = torch.flatten(x, start_dim=1)
         
-        x = self.fc_adjust(x)
+        x = self.fc_adjust(encod_flat)
 
    # Split flattened features into chunks of num_embed_for_concept and pass through linear layers
         concept_outputs = []
@@ -128,7 +129,11 @@ class Encoder(nn.Module):
         else:
             model_concept_outputs = None
 
-        return concept_outputs, model_concept_outputs, linear_weights
+        # can be modify without the if/else by returning always 4 and fix the control on the End2End
+        if self.skip_connection:
+            return concept_outputs, model_concept_outputs, linear_weights, encod_flat       
+        else:
+            return concept_outputs, model_concept_outputs, linear_weights
 
 #%%
 class Decoder(nn.Module):
@@ -171,7 +176,7 @@ class IndependentMLP(nn.Module):
     def __init__(self, input_size, num_concepts, num_classes, num_embed_for_concept=8, num_model_concepts=0):
 
         super(IndependentMLP, self).__init__()
-        self.concept_encoder = Encoder(input_size, num_concepts, num_embed_for_concept=8, num_model_concepts=num_model_concepts)
+        self.concept_encoder = Encoder(input_size, num_concepts, num_embed_for_concept=num_embed_for_concept, num_model_concepts=num_model_concepts)
         self.predictor = MLP(num_concepts + num_model_concepts, num_classes)
 
     def forward(self, x):

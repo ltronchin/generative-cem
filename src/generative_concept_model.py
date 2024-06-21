@@ -54,9 +54,10 @@ if __name__ == "__main__":
     # args = parse_args()
 
     # cfg_file = '/home/riccardo/Github/generative-cem/configs/sequential_00100.yaml'
+    cfg_file = '/home/riccardo/Github/generative-cem/configs/sequential_01100.yaml'
     # cfg_file = '/home/riccardo/Github/generative-cem/configs/sequential_11001.yaml'
     # cfg_file = '/home/riccardo/Github/generative-cem/configs/sequential_11001.yaml'
-    cfg_file = '/home/riccardo/Github/generative-cem/configs/independent_concept.yaml'
+    # cfg_file = '/home/riccardo/Github/generative-cem/configs/independent_concept.yaml'
     # cfg_file = '/home/riccardo/Github/generative-cem/configs/independent_encoder_predictor.yaml'
     # Load JSON file. from the disk.
     with open(cfg_file) as file:        # to run from console ->  args.cfg_file
@@ -81,15 +82,12 @@ if __name__ == "__main__":
     selected_concepts = cfg_data.get('selected_concepts', [])
     
     # Adding presence and number of unsup concept in saving files.
-    if n_model_concepts == 0:
-        exp_name = exp_name + '_0_unsup'
-    else:
-        exp_name = exp_name + f'_{int(n_model_concepts)}_unsup'
+    exp_name = exp_name + f'_{int(n_model_concepts)}_unsup'
 
     # Model.
     cfg_model = cfg['MODEL']
     freeze_encoder = cfg_model['freeze_encoder']
-    pretrained_model_path = cfg_model['pretrained_model_path']
+    pretrained_model_path = cfg_model.get('pretrained_model_path', None)
 
     # Parameters.
     cfg_train = cfg['TRAINING']
@@ -142,7 +140,13 @@ if __name__ == "__main__":
         models_dir = os.path.join(cfg_dir['models_dir'], dataset_name + '_full', exp_name)
         logs_dir = os.path.join(cfg_dir['logs_dir'], dataset_name + '_full', exp_name)
         reports_dir = os.path.join(cfg_dir['reports_dir'], dataset_name + '_full', exp_name)
-        
+    
+    # t is possible to load encoder from different experiment
+    if pretrained_model_path is not None and freeze_encoder:
+        models_dir = models_dir + '/froz_enc'
+        logs_dir = logs_dir + '/froz_enc'
+        reports_dir = reports_dir + '/froz_enc'
+           
   
     util_path.create_dir(models_dir)
     util_path.create_dir(logs_dir)
@@ -158,8 +162,8 @@ if __name__ == "__main__":
     model = select_model(exp_name=exp_name, input_size=(n_channels, img_size, img_size), num_concepts=n_concepts, \
                                 num_embed_for_concept=n_embed_concepts, num_model_concepts=n_model_concepts, num_classes=n_classes)
 
-    # if pretrained_model_path is not None:
-    #     model.load_state_dict(torch.load(pretrained_model_path))
+    if pretrained_model_path is not None and hasattr(model, 'concept_encoder'):
+        model.concept_encoder.load_state_dict(torch.load(pretrained_model_path + f'_{int(n_model_concepts)}_unsup/model_best.pt'))
 
     # Train - Paul Kalkbrenner
     device = torch.device(device_name if torch.cuda.is_available() else "cpu")
@@ -243,9 +247,9 @@ if __name__ == "__main__":
         # Plot MSE for each supervised concepts  vs epochs for visualizations 
         # TODO: instead of plotting mse that is, avergaed over the batches, consider to accumulate 
         # those distances over the epoch X, then retrieve correlations and plot them instead of MSE
-        util_nn.plot_c_excl_unsup_mse_epoch(mse_epoch_dict, preds_concepts_size=n_concepts, unsup_concepts_size=n_model_concepts, 
+        util_nn.plot_c_excl_unsup_mse_epoch(mse_epoch_dict, concepts_size=n_concepts, unsup_concepts_size=n_model_concepts, 
                             save_dir=reports_dir, data_type='MSE')
-        util_nn.plot_c_excl_unsup_mse_epoch(corr_epoch_dict, preds_concepts_size=n_concepts, unsup_concepts_size=n_model_concepts, 
+        util_nn.plot_c_excl_unsup_mse_epoch(corr_epoch_dict, concepts_size=n_concepts, unsup_concepts_size=n_model_concepts, 
                             save_dir=reports_dir)
     
     print("May the force be with you!")

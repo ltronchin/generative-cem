@@ -7,6 +7,7 @@ import time
 import copy
 import numpy as np
 import re
+import re
 from tqdm import tqdm
 import pandas as pd
 from sklearn.metrics import confusion_matrix
@@ -198,20 +199,20 @@ def train_model(model, data_loaders, learning_rate, weights, num_epochs, early_s
                         optimizer.step()
                         
                         # Gradient boundary check
-                        # grad_threshold = 10  # Example threshold value
-                        # for name, param in model.named_parameters():
-                        #     # exclude decoder gradients if no loss on decoder, otherwise always zeros and warnings.
-                        #     if excl_grad_decoder and 'concept_decoder' in name:
-                        #        continue
-                        #     if excl_grad_predictor and 'predictor' in name:
-                        #        continue
-                        #     if 'bias' not in name:  #  don't care if the grads of the bias is low, as it affect only starting point (that can be 0)
-                        #         if param.grad is not None:
-                        #             grad_norm = param.grad.norm()
-                        #             if grad_norm > grad_threshold:
-                        #                 print(f"Warning: Gradient norm for {name}, SHAPE: {param.shape} exceeds threshold: {grad_norm:.8f}")
-                        #             elif grad_norm < 1e-6:  # Example lower boundary for vanishing gradients
-                        #                 print(f"Warning: Gradient norm for {name}, SHAPE: {param.shape} is too small: {grad_norm:.8f}")
+                        grad_threshold = 10  # Example threshold value
+                        for name, param in model.named_parameters():
+                            # exclude decoder gradients if no loss on decoder, otherwise always zeros and warnings.
+                            if excl_grad_decoder and 'concept_decoder' in name:
+                               continue
+                            if excl_grad_predictor and 'predictor' in name:
+                               continue
+                            if 'bias' not in name:  #  don't care if the grads of the bias is low, as it affect only starting point (that can be 0)
+                                if param.grad is not None:
+                                    grad_norm = param.grad.norm()
+                                    if grad_norm > grad_threshold:
+                                        print(f"Warning: Gradient norm for {name}, SHAPE: {param.shape} exceeds threshold: {grad_norm:.8f}")
+                                    elif grad_norm < 1e-6:  # Example lower boundary for vanishing gradients
+                                        print(f"Warning: Gradient norm for {name}, SHAPE: {param.shape} is too small: {grad_norm:.8f}")
                                         
                 # No grad needed for measure distances between superv Cs and unsuperv Cs                   
                 with torch.no_grad():     
@@ -532,11 +533,12 @@ def mse_error_pairwise_batch(tensor1, tensor2):
     
     return errors.mean(dim=0)
     
-def plot_c_excl_unsup_mse_epoch(epoch_mse_errors_dict, preds_concepts_size, unsup_concepts_size, save_dir, data_type = 'corr'):
+def plot_c_excl_unsup_mse_epoch(epoch_mse_errors_dict, concepts_size, unsup_concepts_size, save_dir, data_type = 'corr'):
     num_epochs = len(epoch_mse_errors_dict)
     
-    for i in range(preds_concepts_size):
-        plt.figure()
+    fig, axes = plt.subplots(1, concepts_size, figsize=(15, 5))  # Create subplots
+    for i in range(concepts_size):
+        ax = axes[i]
         
         for j in range(unsup_concepts_size):
             train_means = [epoch_mse_errors_dict[epoch]['train']['mean'].get((i, j), 0 ) for epoch in range(num_epochs)]
@@ -546,23 +548,28 @@ def plot_c_excl_unsup_mse_epoch(epoch_mse_errors_dict, preds_concepts_size, unsu
             val_stds = [epoch_mse_errors_dict[epoch]['val']['std'].get((i, j), 0) for epoch in range(num_epochs)]
             
             # Plot mean values with error bars (standard deviation)
-            plt.errorbar(range(1, num_epochs + 1), train_means, yerr=train_stds, label=f'unsup C{j + 1} Train', linestyle='-', color=f'C{j}')
-            plt.errorbar(range(1, num_epochs + 1), val_means, yerr=val_stds, label=f'unsup C{j + 1} Val', linestyle='--', color=f'C{j}')
+            ax.errorbar(range(1, num_epochs + 1), train_means, yerr=train_stds, label=f'unsup C{j + 1} Train', linestyle='-', color=f'C{j}')
+            ax.errorbar(range(1, num_epochs + 1), val_means, yerr=val_stds, label=f'unsup C{j + 1} Val', linestyle='--', color=f'C{j}')
         
-        plt.xlabel('Epochs')
-        plt.ylabel('Pearson Correlation' if data_type == 'corr' else data_type)
-        plt.title(f'Excluded concept {i + 1}')
-        plt.legend(title='Legend:', loc='best', fontsize='small')
+        ax.set_xlabel('Epochs')
+        ax.set_ylabel('Pearson Correlation' if data_type == 'corr' else data_type)
+        ax.set_title(f'Excluded concept {i + 1}')
+        
+            
+        if unsup_concepts_size <= 3:
+            ax.legend(title='Legend:', loc='best', fontsize='small')
         
         # Additional text box for clarity
-        plt.text(0.5, 0.92, 'Continuous line: Train\n-- line: Validation', horizontalalignment='center', 
-                 verticalalignment='center', fontsize=4,
-                 transform=plt.gca().transAxes, bbox=dict(facecolor='white', alpha=0.5))
-        
-        # Save and show the plot
-        plt.savefig(os.path.join(save_dir, f'{data_type}_epoch_preds_concept_{i + 1}.png'))
-        plt.show()
-        plt.close()
+        if unsup_concepts_size > 3:
+            ax.text(0.5, 0.92, 'Continuous line: Train\n-- line: Validation', horizontalalignment='center', 
+                    verticalalignment='center', fontsize=9,
+                    transform=ax.transAxes, bbox=dict(facecolor='white', alpha=0.5))
+    
+    # Adjust layout and save the figure
+    plt.tight_layout()
+    plt.savefig(os.path.join(save_dir, f'{data_type}_epoch_concepts_vs_unsup.png'))
+    plt.show()
+    plt.close()
 
 #################################################### correlations and distances post taining ############################
 #%%

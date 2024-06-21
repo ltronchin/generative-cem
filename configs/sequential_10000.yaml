@@ -25,10 +25,10 @@ REPORTS:
 
 MODEL:
   freeze_encoder: True
-  pretrained_model_path: ./models/dsprites_partial/oracle/model_best.pt
+  pretrained_model_path: ./models/dsprites_partial/indipendent_concept
 
 TRAINING:
-  num_epochs: 20
+  num_epochs: 50
   batch_size: 128
   learning_rate: 0.0001
   warmup_epochs: 5

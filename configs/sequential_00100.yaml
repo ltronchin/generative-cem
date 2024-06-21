@@ -12,7 +12,7 @@ DATA:
   n_classes: 2
   n_concepts: 3
   n_embed_concepts: 16
-  n_model_concepts: 7
+  n_model_concepts: 0
   selected_concepts: [1,3,5]
 
 REPORTS:
@@ -26,7 +26,7 @@ REPORTS:
 
 MODEL:
   freeze_encoder: True
-  pretrained_model_path: ./models/dsprites_partial/oracle/model_best.pt
+  pretrained_model_path: ./models/dsprites_partial/independent_concept
 
 TRAINING:
   num_epochs: 60

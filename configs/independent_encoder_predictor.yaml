@@ -26,7 +26,7 @@ REPORTS:
 
 MODEL:
   freeze_encoder: True
-  pretrained_model_path: ./models/dsprites_partial/oracle/model_best.pt
+  pretrained_model_path: ./models/dsprites_partial/independent_concept
 
 TRAINING:
   num_epochs: 60

@@ -25,8 +25,9 @@ REPORTS:
 #   reports_dir: /home/riccardo/Github/reports/
 
 MODEL:
-  freeze_encoder: True
-  pretrained_model_path: ./models/dsprites_partial/oracle/model_best.pt
+  freeze_encoder: False
+  # No need for independent concept a pre-trained in this as it is an indipendenet concept model
+  # pretrained_model_path: ./models/dsprites_partial/oracle/model_best.pt
 
 TRAINING:
   num_epochs: 60
