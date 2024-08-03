@@ -155,12 +155,12 @@ def train_model(model, data_loaders, learning_rate, weights, num_epochs, early_s
                     if type(model).__name__ == 'End2End':
                         preds_concepts, unsup_concepts, preds_task, preds_img_tilde, preds_concepts_tilde, linear_weights = model(imgs)
                     elif type(model).__name__ == 'IndependentMLP':
-                        preds_concepts, unsup_concepts, preds_task = model(imgs)
+                        preds_concepts, unsup_concepts, preds_task, linear_weights = model(imgs)
                         # Creating missing variables by casting them to original value for conserving loss calculation
                         preds_img_tilde = imgs
                         preds_concepts_tilde = preds_concepts
                     elif type(model).__name__ == 'Encoder':
-                        preds_concepts, unsup_concepts, linear_weights = model(imgs)
+                        preds_concepts, unsup_concepts, linear_weights, _  = model(imgs)
                         # Creating missing variables for losses by casting them to original value for conserving loss calculation
                         preds_task = torch.zeros((imgs.size(0), 2), dtype=torch.float32, device=device)
                         preds_img_tilde = imgs
@@ -193,26 +193,64 @@ def train_model(model, data_loaders, learning_rate, weights, num_epochs, early_s
                     else:
                         orth_loss =  torch.tensor(0.0).to(device)
                     
+                    # Printing types after all operations
+                    # print(f"Type of preds_concepts: {type(preds_concepts)}, dtype: {preds_concepts.dtype}")
+                    # print(f"Type of c_to_keep: {type(c_to_keep)}, dtype: {c_to_keep.dtype}")
+                    # print(f"Type of preds_task: {type(preds_task)}, dtype: {preds_task.dtype}")
+                    # print(f"Type of labels: {type(labels)}, dtype: {labels.dtype}")
+                    # print(f"Type of preds_img_tilde: {type(preds_img_tilde)}, dtype: {preds_img_tilde.dtype}")
+                    # print(f"Type of imgs: {type(imgs)}, dtype: {imgs.dtype}")
+                    # print(f"Type of preds_concepts_tilde: {type(preds_concepts_tilde)}, dtype: {preds_concepts_tilde.dtype}")
+                    # print(f"Type of unsup_concepts: {type(unsup_concepts)}, dtype: {unsup_concepts.dtype}")
+
+                    # print(f"Type of concept_loss: {type(concept_loss)}, dtype: {concept_loss.dtype}")
+                    # print(f"Type of task_loss: {type(task_loss)}, dtype: {task_loss.dtype}")
+                    # print(f"Type of rec_loss: {type(rec_loss)}, dtype: {rec_loss.dtype}")
+                    # print(f"Type of lat_loss: {type(lat_loss)}, dtype: {lat_loss.dtype}")
+                    # print(f"Type of orth_loss: {type(orth_loss)}, dtype: {orth_loss.dtype}")
+                    # print(f"Type of loss: {type(loss)}, dtype: {loss.dtype}")
+                    
+                    # if torch.isnan(loss).any() or torch.isinf(loss).any():
+                    #     print("Loss contains NaNs or Infs")
+                    #     print(f"concept_loss: {concept_loss}")
+                    #     print(f"task_loss: {task_loss}")
+                    #     print(f"rec_loss: {rec_loss}")
+                    #     print(f"lat_loss: {lat_loss}")
+                    #     print(f"orth_loss: {orth_loss}")
+                    
+                    # print(f"Total loss: {loss.item()}")
+                    
+                    # print(f"preds_concepts requires grad: {preds_concepts.requires_grad}")
+                    # print(f"c_to_keep requires grad: {c_to_keep.requires_grad}")
+                    # print(f"preds_task requires grad: {preds_task.requires_grad}")
+                    # print(f"labels requires grad: {labels.requires_grad}")
+                    # print(f"preds_img_tilde requires grad: {preds_img_tilde.requires_grad}")
+                    # print(f"imgs requires grad: {imgs.requires_grad}")
+                    # print(f"preds_concepts_tilde requires grad: {preds_concepts_tilde.requires_grad}")
+                    # print(f"unsup_concepts requires grad: {unsup_concepts.requires_grad}")
+                    # print(f"linear_weights requires grad: {linear_weights[2].requires_grad}")
+
                     # backward + optimize only if in training phase
                     if phase == 'train':
+                        # with torch.autograd.detect_anomaly():
                         loss.backward()
                         optimizer.step()
                         
-                        # Gradient boundary check
-                        grad_threshold = 10  # Example threshold value
-                        for name, param in model.named_parameters():
-                            # exclude decoder gradients if no loss on decoder, otherwise always zeros and warnings.
-                            if excl_grad_decoder and 'concept_decoder' in name:
-                               continue
-                            if excl_grad_predictor and 'predictor' in name:
-                               continue
-                            if 'bias' not in name:  #  don't care if the grads of the bias is low, as it affect only starting point (that can be 0)
-                                if param.grad is not None:
-                                    grad_norm = param.grad.norm()
-                                    if grad_norm > grad_threshold:
-                                        print(f"Warning: Gradient norm for {name}, SHAPE: {param.shape} exceeds threshold: {grad_norm:.8f}")
-                                    elif grad_norm < 1e-6:  # Example lower boundary for vanishing gradients
-                                        print(f"Warning: Gradient norm for {name}, SHAPE: {param.shape} is too small: {grad_norm:.8f}")
+                        # # Gradient boundary check
+                        # grad_threshold = 10  # Example threshold value
+                        # for name, param in model.named_parameters():
+                        #     # exclude decoder gradients if no loss on decoder, otherwise always zeros and warnings.
+                        #     if excl_grad_decoder and 'concept_decoder' in name:
+                        #        continue
+                        #     if excl_grad_predictor and 'predictor' in name:
+                        #        continue
+                        #     if 'bias' not in name:  #  don't care if the grads of the bias is low, as it affect only starting point (that can be 0)
+                        #         if param.grad is not None:
+                        #             grad_norm = param.grad.norm()
+                        #             if grad_norm > grad_threshold:
+                        #                 print(f"Warning: Gradient norm for {name}, SHAPE: {param.shape} exceeds threshold: {grad_norm:.8f}")
+                        #             elif grad_norm < 1e-6:  # Example lower boundary for vanishing gradients
+                        #                 print(f"Warning: Gradient norm for {name}, SHAPE: {param.shape} is too small: {grad_norm:.8f}")
                                         
                 # No grad needed for measure distances between superv Cs and unsuperv Cs                   
                 with torch.no_grad():     
@@ -365,7 +403,7 @@ def evaluate(model, data_loader, device):
             if type(model).__name__ == 'End2End':
                 preds_concepts, unsup_concepts, preds_task, preds_rec, preds_concepts_tilde, _ = model(inputs)
             elif type(model).__name__ == 'IndependentMLP':
-                preds_concepts, unsup_concepts, preds_task = model(inputs)
+                preds_concepts, unsup_concepts, preds_task, _ = model(inputs)
                 # Creating missing variables by casting them to original value for conserving loss calculation
                 preds_rec = inputs
                 preds_concepts_tilde = preds_concepts
@@ -425,7 +463,7 @@ def predict(model, data_loader, device):
                 preds_concepts, _, _, _, _, _ = model(inputs)
                 
             elif type(model).__name__ == 'IndependentMLP':
-                preds_concepts, _, _ = model(inputs)
+                preds_concepts, _, _, _ = model(inputs)
                 
             elif type(model).__name__ == 'Encoder':
                 preds_concepts, _, _ = model(inputs)
@@ -533,40 +571,41 @@ def mse_error_pairwise_batch(tensor1, tensor2):
     
     return errors.mean(dim=0)
     
-def plot_c_excl_unsup_mse_epoch(epoch_mse_errors_dict, concepts_size, unsup_concepts_size, save_dir, data_type = 'corr'):
+def plot_c_excl_unsup_vs_epoch(epoch_mse_errors_dict, concepts_size, unsup_concepts_size, save_dir, data_type='corr'):
     num_epochs = len(epoch_mse_errors_dict)
     
-    fig, axes = plt.subplots(1, concepts_size, figsize=(15, 5))  # Create subplots
+    fig, axes = plt.subplots(1, concepts_size, figsize=(15, 5), sharex=True, sharey=True)  # Create subplots with shared axes
+    handles = []
+    labels = []
+    
     for i in range(concepts_size):
         ax = axes[i]
         
         for j in range(unsup_concepts_size):
-            train_means = [epoch_mse_errors_dict[epoch]['train']['mean'].get((i, j), 0 ) for epoch in range(num_epochs)]
+            train_means = [epoch_mse_errors_dict[epoch]['train']['mean'].get((i, j), 0) for epoch in range(num_epochs)]
             val_means = [epoch_mse_errors_dict[epoch]['val']['mean'].get((i, j), 0) for epoch in range(num_epochs)]
             
-            train_stds = [epoch_mse_errors_dict[epoch]['train']['std'].get((i, j),0) for epoch in range(num_epochs)]
+            train_stds = [epoch_mse_errors_dict[epoch]['train']['std'].get((i, j), 0) for epoch in range(num_epochs)]
             val_stds = [epoch_mse_errors_dict[epoch]['val']['std'].get((i, j), 0) for epoch in range(num_epochs)]
             
             # Plot mean values with error bars (standard deviation)
-            ax.errorbar(range(1, num_epochs + 1), train_means, yerr=train_stds, label=f'unsup C{j + 1} Train', linestyle='-', color=f'C{j}')
-            ax.errorbar(range(1, num_epochs + 1), val_means, yerr=val_stds, label=f'unsup C{j + 1} Val', linestyle='--', color=f'C{j}')
+            train_line = ax.errorbar(range(1, num_epochs + 1), train_means, yerr=train_stds, label=f'unsup C{j + 1} Train', linestyle='-', color=f'C{j}')
+            val_line = ax.errorbar(range(1, num_epochs + 1), val_means, yerr=val_stds, label=f'unsup C{j + 1} Val', linestyle='--', color=f'C{j}')
+            
+            if i == 0:  # Collect handles and labels for the legend from the first subplot only
+                handles.append(train_line)
+                handles.append(val_line)
         
         ax.set_xlabel('Epochs')
         ax.set_ylabel('Pearson Correlation' if data_type == 'corr' else data_type)
         ax.set_title(f'Excluded concept {i + 1}')
-        
-            
-        if unsup_concepts_size <= 3:
-            ax.legend(title='Legend:', loc='best', fontsize='small')
-        
-        # Additional text box for clarity
-        if unsup_concepts_size > 3:
-            ax.text(0.5, 0.92, 'Continuous line: Train\n-- line: Validation', horizontalalignment='center', 
-                    verticalalignment='center', fontsize=9,
-                    transform=ax.transAxes, bbox=dict(facecolor='white', alpha=0.5))
+    
+    # Create a single legend for all subplots
+    fig.legend(handles=[handle[0] for handle in handles], labels=[handle.get_label() for handle in handles], 
+               loc='lower center', ncol=unsup_concepts_size, fontsize='small', title='Legend:')
     
     # Adjust layout and save the figure
-    plt.tight_layout()
+    plt.tight_layout(rect=[0, 0.1, 1, 0.95])  # Make space for the legend at the bottom
     plt.savefig(os.path.join(save_dir, f'{data_type}_epoch_concepts_vs_unsup.png'))
     plt.show()
     plt.close()
@@ -590,7 +629,7 @@ def calculate_and_save_distances(model, data_loaders, device, output_dir):
                 if type(model).__name__ == 'End2End':
                     preds_concepts, unsup_concepts, _, _, _, _ = model(imgs)
                 elif type(model).__name__ == 'IndependentMLP':
-                    preds_concepts, unsup_concepts, _ = model(imgs)
+                    preds_concepts, unsup_concepts, _, _ = model(imgs)
                 elif type(model).__name__ == 'Encoder':
                     preds_concepts, unsup_concepts,_ = model(imgs)
 
@@ -689,7 +728,7 @@ def calculate_and_save_correlations(model, data_loaders, device, output_dir, sup
                 if type(model).__name__ == 'End2End':
                     preds_concepts, unsup_concepts, _, _, _, _ = model(imgs)
                 elif type(model).__name__ == 'IndependentMLP':
-                    preds_concepts, unsup_concepts, _ = model(imgs)
+                    preds_concepts, unsup_concepts, _, _ = model(imgs)
                 elif type(model).__name__ == 'Encoder':
                     preds_concepts, unsup_concepts,_ = model(imgs)
                 else:
@@ -705,7 +744,7 @@ def calculate_and_save_correlations(model, data_loaders, device, output_dir, sup
     unsup_concepts_array = np.concatenate(unsup_concepts_list, axis=0)
     excl_concepts_array = np.concatenate(excl_concepts_list, axis=0)
 
-    # If varaible true change to perform correlation between sup and unsup
+    # If variable true change to perform correlation between sup and unsup
     if sup_unsup:
         excl_concepts_array = preds_concepts_array
 
@@ -941,9 +980,10 @@ def run_tsne(model, data_loader, savedir=None, device='cpu', perplexity=30, n_it
                 if type(model).__name__ == 'End2End':
                     preds_concepts, unsup_concepts, preds_task, preds_img_tilde, preds_concepts_tilde, linear_weights = model(imgs)
                 elif type(model).__name__ == 'IndependentMLP':
-                    preds_concepts, unsup_concepts, preds_task = model(imgs)
+                    preds_concepts, unsup_concepts, preds_task, linear_weights = model(imgs)
                 elif type(model).__name__ == 'Encoder':
                     preds_concepts, unsup_concepts, linear_weights = model(imgs)
+                    preds_task = 0
                 else:
                     raise ValueError('Model type not found!')
                 
@@ -1054,7 +1094,7 @@ def run_tsne2(model, data_loader, savedir=None, device='cpu', perplexity=30, n_i
                 if type(model).__name__ == 'End2End':
                     preds_concepts, unsup_concepts, preds_task, preds_img_tilde, preds_concepts_tilde, linear_weights = model(imgs)
                 elif type(model).__name__ == 'IndependentMLP':
-                    preds_concepts, unsup_concepts, preds_task = model(imgs)
+                    preds_concepts, unsup_concepts, preds_task, linear_weights = model(imgs)
                     # Creating missing variables by casting them to original value for conserving loss calculation
                     preds_img_tilde = imgs
                     preds_concepts_tilde = preds_concepts
@@ -1252,7 +1292,7 @@ def run_tsne3(model, data_loader, savedir=None, device='cpu', perplexity=30, n_i
                 if type(model).__name__ == 'End2End':
                     preds_concepts, unsup_concepts, preds_task, preds_img_tilde, preds_concepts_tilde, linear_weights = model(imgs)
                 elif type(model).__name__ == 'IndependentMLP':
-                    preds_concepts, unsup_concepts, preds_task = model(imgs)
+                    preds_concepts, unsup_concepts, preds_task, linear_weights = model(imgs)
                     # Creating missing variables by casting them to original value for conserving loss calculation
                     preds_img_tilde = imgs
                     preds_concepts_tilde = preds_concepts

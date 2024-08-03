@@ -9,12 +9,15 @@ import sys
 sys.path.extend([
     "./",
 ])
+os.chdir('/home/riccardo/Github/generative-cem/')
 import seaborn as sns
+
 
 from torch.utils.data import Dataset
 from torchvision import transforms
 import torch.nn as nn
 import torch
+import h5py
 # import torchvision.models as models
 from torch.utils.data import DataLoader
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support
@@ -51,16 +54,25 @@ def parse_args():
 
 if __name__ == "__main__":
 #%%
-    # args = parse_args()
-
-    # cfg_file = '/home/riccardo/Github/generative-cem/configs/sequential_00100.yaml'
-    cfg_file = '/home/riccardo/Github/generative-cem/configs/sequential_01100.yaml'
-    # cfg_file = '/home/riccardo/Github/generative-cem/configs/sequential_11001.yaml'
-    # cfg_file = '/home/riccardo/Github/generative-cem/configs/sequential_11001.yaml'
-    # cfg_file = '/home/riccardo/Github/generative-cem/configs/independent_concept.yaml'
-    # cfg_file = '/home/riccardo/Github/generative-cem/configs/independent_encoder_predictor.yaml'
+    args = parse_args()
+ # DSPRITE
+    # cfg_file = '/home/riccardo/Github/generative-cem/configs/dsprites/sequential_00100.yaml'
+    # cfg_file = '/home/riccardo/Github/generative-cem/configs/dsprites/sequential_01100.yaml'
+    # cfg_file = '/home/riccardo/Github/generative-cem/configs/dsprites/sequential_11001.yaml'
+    # cfg_file = '/home/riccardo/Github/generative-cem/configs/dsprites/sequential_11001.yaml'
+    # cfg_file = '/home/riccardo/Github/generative-cem/configs/dsprites/independent_concept.yaml'
+    # cfg_file = '/home/riccardo/Github/generative-cem/configs/dsprites/independent_encoder_predictor.yaml'
+    
+# CAMELYON  
+    # cfg_file = '/home/riccardo/Github/generative-cem/configs/camelyon/sequential_00100.yaml'
+    # cfg_file = '/home/riccardo/Github/generative-cem/configs/camelyon/sequential_01100.yaml'
+    # cfg_file = '/home/riccardo/Github/generative-cem/configs/camelyon/sequential_11001.yaml'
+    # cfg_file = '/home/riccardo/Github/generative-cem/configs/camelyon/sequential_11001.yaml'
+    # cfg_file = '/home/riccardo/Github/generative-cem/configs/camelyon/independent_concept.yaml'
+    # cfg_file = '/home/riccardo/Github/generative-cem/configs/camelyon/independent_encoder_predictor.yaml'
+    
     # Load JSON file. from the disk.
-    with open(cfg_file) as file:        # to run from console ->  args.cfg_file
+    with open(args.cfg_file) as file:        # to run from console ->  args.cfg_file
         cfg = yaml.load(file, Loader=yaml.FullLoader)
 
     exp_name = cfg['exp_name']
@@ -71,24 +83,30 @@ if __name__ == "__main__":
     cfg_data = cfg['DATA']
     dataset_name = cfg_data['dataset_name']
     data_dir = cfg_data['data_dir']
-    file_name = cfg_data['file_name']
-    file_type = cfg_data['file_type']
+    file_name = cfg_data.get('file_name', [])
+    file_type = cfg_data.get('file_type')
     img_size = cfg_data['img_size']
     n_channels = cfg_data['n_channels']
     n_classes = cfg_data['n_classes']
     n_concepts = cfg_data['n_concepts']
     n_embed_concepts = cfg_data['n_embed_concepts']
     n_model_concepts = cfg_data['n_model_concepts']
-    selected_concepts = cfg_data.get('selected_concepts', [])
+    selected_concepts = cfg_data.get('selected_concepts', [0,1,2,3,4,5])
+    norm_concepts = cfg_data.get('norm_concepts', True)
     
     # Adding presence and number of unsup concept in saving files.
     exp_name = exp_name + f'_{int(n_model_concepts)}_unsup'
 
     # Model.
     cfg_model = cfg['MODEL']
+    skip_connection = cfg_model.get('skip_connection', False)
     freeze_encoder = cfg_model['freeze_encoder']
     pretrained_model_path = cfg_model.get('pretrained_model_path', None)
-
+    
+    # Adding presence of skip_connection
+    if 'sequential' in exp_name and skip_connection:
+        exp_name = exp_name + f'_skip'
+        
     # Parameters.
     cfg_train = cfg['TRAINING']
     num_epochs = cfg_train['num_epochs']
@@ -102,13 +120,52 @@ if __name__ == "__main__":
     weight_rec_loss = cfg_train['weight_rec_loss']
     weight_lat_loss = cfg_train['weight_lat_loss']
     weight_orth_loss = cfg_train['weight_orth_loss']
+    
+    # Print configuration
+    print('\nMODEL CONFIGURATION')
+    print(f"n_concepts:              {n_concepts}")
+    print(f"n_embed_for_concept:     {n_embed_concepts}")
+    print(f"n_model_concepts:        {n_model_concepts}")
+    print(f"selected_concepts:       {selected_concepts}")
+    print(f"norm_concepts:           {norm_concepts}")
+    print(f"skip_connection:         {skip_connection}")
+    print(f"freeze_encoder:          {freeze_encoder}")
+    print('\nTRAINING')
+    print(f"num_epochs:              {num_epochs}")
+    print(f"batch_size:              {batch_size}")
+    print(f"learning_rate:           {learning_rate}")
+    print('\nWEIGHTS')
+    print(f"weight_concept_loss:     {weight_concept_loss}")
+    print(f"weight_task_loss:        {weight_task_loss}")
+    print(f"weight_rec_loss:         {weight_rec_loss}")
+    print(f"weight_lat_loss:         {weight_lat_loss}")
+    print(f"weight_orth_loss:        {weight_orth_loss}")
 
-     # Dataset.
+
+     # Datasets.
     if 'dsprites' in dataset_name:
         datasets = {
             step: util_data.dSpritesDataset(data_dir=data_dir, fname=f'{file_name}_{step}.{file_type}', use_concepts=True, concept_to_keep=selected_concepts)
             for step in ['train', 'val', 'test']
-        }
+            }
+    elif 'camelyon' in dataset_name:
+        #################################################### Following info in config file lately (except for raw_dir maybe) 
+        subset_name_list = [
+            'cam16',
+            'all500',
+            'extra17',
+            'test_data2',
+            'pannuke']
+        data_dir = os.path.join(os.getcwd(),'data', dataset_name, 'interim', 'cmeasures')  # here find the concepts and data splits)
+        raw_dir = '/home/lorenzo/generative-cem/data/camelyon/raw' # here find the patches
+        reports_dir = os.path.join('reports', dataset_name)
+        ###############################################################
+        datasets = {
+            step: util_data.CamelyonDataset(subset = subset_name_list, csv_file = data_dir + f'/df_{step}.csv', root_dir = raw_dir, 
+                                            norm_img=True, to_tensor=True, transform=None, norm_conc=norm_concepts, concept_to_keep=[selected_concepts])
+            for step in ['train', 'val', 'test']
+            }
+        
     else:
         raise ValueError(f"Dataset {dataset_name} not implemented.")
 
@@ -116,7 +173,7 @@ if __name__ == "__main__":
     data_loaders = {
         step: DataLoader(datasets[step], batch_size=batch_size, shuffle=True)
         for step in ['train', 'val', 'test']
-    }
+        }
 
     # Sample one batch.
     sample = next(iter(data_loaders['train']))
@@ -141,7 +198,8 @@ if __name__ == "__main__":
         logs_dir = os.path.join(cfg_dir['logs_dir'], dataset_name + '_full', exp_name)
         reports_dir = os.path.join(cfg_dir['reports_dir'], dataset_name + '_full', exp_name)
     
-    # t is possible to load encoder from different experiment
+    # It is possible to load encoder from different experiment
+    # TODO: pretrained_model_path doesn't need to be a string, it can be a normal boolean, would it make it easier
     if pretrained_model_path is not None and freeze_encoder:
         models_dir = models_dir + '/froz_enc'
         logs_dir = logs_dir + '/froz_enc'
@@ -159,11 +217,18 @@ if __name__ == "__main__":
 
     from src.models.models import select_model, Encoder, MLP, IndependentMLP, Decoder, End2End
     # model = models.select_model....
-    model = select_model(exp_name=exp_name, input_size=(n_channels, img_size, img_size), num_concepts=n_concepts, \
-                                num_embed_for_concept=n_embed_concepts, num_model_concepts=n_model_concepts, num_classes=n_classes)
-
-    if pretrained_model_path is not None and hasattr(model, 'concept_encoder'):
+    model = select_model(exp_name=exp_name, input_size=(n_channels, img_size, img_size), num_concepts=n_concepts, num_model_concepts=n_model_concepts, \
+                                num_embed_for_concept=n_embed_concepts, skip_connection = skip_connection, num_classes=n_classes)
+    total_params= sum([p.numel() for p in model.parameters() if p.requires_grad])
+    print(f'Model created with Num params: {total_params}')
+    
+    if freeze_encoder and pretrained_model_path is not None and hasattr(model, 'concept_encoder'):
         model.concept_encoder.load_state_dict(torch.load(pretrained_model_path + f'_{int(n_model_concepts)}_unsup/model_best.pt'))
+        for param in model.concept_encoder.parameters():
+            param.requires_grad = False
+        num_param_after_freeze = sum([p.numel() for p in model.parameters() if p.requires_grad])
+        print('Encoder weights loaded correclty')
+        print(f'Freezing {total_params - num_param_after_freeze} parameters -> TL model has now {num_param_after_freeze} trainable parameters')
 
     # Train - Paul Kalkbrenner
     device = torch.device(device_name if torch.cuda.is_available() else "cpu")
@@ -200,6 +265,7 @@ if __name__ == "__main__":
     # Save c_train, c_val, c_test dividing the splits.
     outdir = os.path.join('home/riccardo/Github/generative-cem/data/', exp_name)
     util_path.create_dir(outdir)
+    # Consider if saving also the csv of concepts of camelyon (doesn't see why btw)
     np.save(os.path.join(outdir, 'c_train.npy'), c_train)
     np.save(os.path.join(outdir, 'c_val.npy'), c_val)
     np.save(os.path.join(outdir, 'c_test.npy'), c_test)
@@ -247,9 +313,9 @@ if __name__ == "__main__":
         # Plot MSE for each supervised concepts  vs epochs for visualizations 
         # TODO: instead of plotting mse that is, avergaed over the batches, consider to accumulate 
         # those distances over the epoch X, then retrieve correlations and plot them instead of MSE
-        util_nn.plot_c_excl_unsup_mse_epoch(mse_epoch_dict, concepts_size=n_concepts, unsup_concepts_size=n_model_concepts, 
+        util_nn.plot_c_excl_unsup_vs_epoch(mse_epoch_dict, concepts_size=n_concepts, unsup_concepts_size=n_model_concepts, 
                             save_dir=reports_dir, data_type='MSE')
-        util_nn.plot_c_excl_unsup_mse_epoch(corr_epoch_dict, concepts_size=n_concepts, unsup_concepts_size=n_model_concepts, 
+        util_nn.plot_c_excl_unsup_vs_epoch(corr_epoch_dict, concepts_size=n_concepts, unsup_concepts_size=n_model_concepts, 
                             save_dir=reports_dir)
     
     print("May the force be with you!")

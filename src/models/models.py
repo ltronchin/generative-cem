@@ -1,3 +1,4 @@
+#%% 
 """
 Models for the experiments.
 """
@@ -23,19 +24,20 @@ sns.set(style="whitegrid", font_scale=1.6, rc={"figure.figsize": (column_width_i
 
 # Funzione che seleziona il modello in base all'esperimento
 
-def select_model(exp_name, input_size, num_concepts, num_embed_for_concept, num_model_concepts, num_classes):
+def select_model(exp_name, input_size, num_concepts, num_embed_for_concept, num_model_concepts, skip_connection, num_classes):
     if 'independent_concept' in exp_name:
         return Encoder(input_size, num_concepts, num_embed_for_concept=num_embed_for_concept, num_model_concepts=num_model_concepts)
-    elif 'independent_predictor' in exp_name:
-        return MLP(num_concepts, num_classes)
-    elif 'independent_decoder' in exp_name:
-        return Decoder(input_size, num_concepts, num_model_concepts=num_model_concepts)
+    # elif 'independent_predictor' in exp_name:
+    #     return MLP(num_concepts, num_classes)
+    # elif 'independent_decoder' in exp_name:
+    #     return Decoder(input_size, num_concepts, num_model_concepts=num_model_concepts)
     elif 'sequential' in exp_name:
-        return End2End(input_size, num_concepts, num_classes, num_embed_for_concept, num_model_concepts)
-    elif 'joint' in exp_name:
-        return End2End(input_size, num_concepts, num_classes, num_embed_for_concept, num_model_concepts)
+        return End2End(input_size, num_concepts, num_classes, num_embed_for_concept, num_model_concepts, skip_connection)
+    # elif 'joint' in exp_name:
+    #     return End2End(input_size, num_concepts, num_classes, num_embed_for_concept, num_model_concepts)
     elif 'independet_encoder_predictor':
-        return IndependentMLP(input_size, num_concepts, num_classes, num_embed_for_concept=num_embed_for_concept, num_model_concepts=num_model_concepts)
+        return IndependentMLP(input_size, num_concepts, num_classes, num_embed_for_concept=num_embed_for_concept, \
+            num_model_concepts=num_model_concepts)
     else:
         raise ValueError("Invalid experiment name.")
 
@@ -54,13 +56,12 @@ class MLP(nn.Module):
         return output
 #%%
 class Encoder(nn.Module):
-    def __init__(self, input_size, num_concepts, num_embed_for_concept=16, num_model_concepts = 0, feature_sizes=(16, 32, 64, 128), skip_connection = False):
+    def __init__(self, input_size, num_concepts, num_embed_for_concept=16, num_model_concepts = 0, \
+        feature_sizes=(16, 32, 64, 128)):
         super(Encoder, self).__init__()
         
         self.input_size = input_size
-        self.feature_sizes = feature_sizes
-        self.skip_connection = skip_connection
-        
+        self.feature_sizes = feature_sizes      
         self.num_concepts = num_concepts
         self.num_model_concepts = num_model_concepts
         self.num_embed_for_concept = num_embed_for_concept
@@ -102,49 +103,45 @@ class Encoder(nn.Module):
         
         x = self.fc_adjust(encod_flat)
 
-   # Split flattened features into chunks of num_embed_for_concept and pass through linear layers
+        # Split flattened features into chunks of num_embed_for_concept and pass through linear layers
         concept_outputs = []
         model_concept_outputs = []
-        linear_weights = []
-
-        for i, linear_layer in enumerate(self.linear_layers):
-            chunk = x[:, i * self.num_embed_for_concept : (i + 1) * self.num_embed_for_concept]
+        # Iterate over different layers using different chunks based on splitting of x
+        for i, (linear_layer, chunk) in enumerate(zip(self.linear_layers, x.split(self.num_embed_for_concept, dim=1))):
+            c_output = linear_layer(chunk)
             if i < self.num_concepts:
                 # First i are supervised
-                concept_output = linear_layer(chunk)
-                concept_outputs.append(concept_output)
+                concept_outputs.append(c_output)
             else:
                 # Remaining unsupervised 
-                model_concept_output = linear_layer(chunk)
-                model_concept_outputs.append(model_concept_output)
+                model_concept_outputs.append(c_output)
             
-            # Save the weights of the linear layer
-            linear_weights.append(linear_layer.weight)
 
         # Concatenate outputs along the feature dimension
         concept_outputs = torch.cat(concept_outputs, dim=1)
-      
-        if model_concept_outputs:
-            model_concept_outputs = torch.cat(model_concept_outputs, dim=1)
-        else:
-            model_concept_outputs = None
+        model_concept_outputs = torch.cat(model_concept_outputs, dim=1) if model_concept_outputs else None
 
-        # can be modify without the if/else by returning always 4 and fix the control on the End2End
-        if self.skip_connection:
-            return concept_outputs, model_concept_outputs, linear_weights, encod_flat       
-        else:
-            return concept_outputs, model_concept_outputs, linear_weights
+        
+        # Get the linear layers weights
+        linear_weights = [layer.weight for layer in self.linear_layers]
+        
+        return concept_outputs, model_concept_outputs, linear_weights, encod_flat       
 
 #%%
 class Decoder(nn.Module):
-    def __init__(self, output_size, num_concepts, num_model_concepts = 0, feature_sizes=(16, 32, 64, 128)):
+    def __init__(self, output_size, num_concepts, num_model_concepts = 0, num_embed_for_concept = 16, skip_connection = False, feature_sizes=(16, 32, 64, 128)):
         super(Decoder, self).__init__()
-
+        
+        self.skip_connection = skip_connection
         self.feature_sizes = feature_sizes[::-1]
-
-        self.start_size = output_size[1] // (2 ** len(self.feature_sizes))
-        self.fc = nn.Linear(num_concepts + num_model_concepts, self.feature_sizes[0] * self.start_size * self.start_size)
-
+        self.start_size = output_size[1] // (2 ** len(self.feature_sizes))  
+        self.num_elements = self.feature_sizes[0] * self.start_size * self.start_size   
+        
+        self.parallel_linear_layers = nn.ModuleList()
+        for _ in range(num_concepts + num_model_concepts):
+            self.parallel_linear_layers.append(nn.Linear(1, num_embed_for_concept))
+            
+        self.fc_adjust = nn.Linear((num_concepts + num_model_concepts) * num_embed_for_concept, self.num_elements)
         self.convs_transpose = nn.ModuleList()
         in_channels = self.feature_sizes[0]
 
@@ -162,10 +159,36 @@ class Decoder(nn.Module):
             nn.Sigmoid()
         )
 
-    def forward(self, concepts):
-
-        x = self.fc(concepts)
-        x = x.view(-1, self.feature_sizes[0], self.start_size, self.start_size)
+    def forward(self, concepts, encod_flat= None):
+        
+        # Apply the parallel linear layers to map the concepts into a new embedding, then concatenate
+        expanded_concepts = []
+        for i, concept_output in enumerate(concepts.split(1, dim=1)):
+            mapped_concept = self.parallel_linear_layers[i](concept_output)
+            expanded_concepts.append(mapped_concept)
+        expanded_concepts = torch.cat(expanded_concepts, dim=1)
+        
+        if self.skip_connection:
+            if expanded_concepts is None or encod_flat is None:
+                raise ValueError("expanded_concepts and encod_flat must not be None when skip_connection is True")
+            # Concatenate expanded_concepts with the encod_flat
+            combined_features = torch.cat((expanded_concepts, encod_flat), dim=1)
+                
+            # # Average pooling to reduce the number of elements
+            # selected_features = nn.functional.adaptive_avg_pool1d(combined_features, self.num_elements)           
+            
+            # Randomly delete elements to match the required number for decoder (Sparse rapresentation? Similar to a dropout?)
+            indices = torch.randperm(combined_features.size(1))[:self.num_elements]
+            selected_features = combined_features[:, indices]
+        
+            # Reshaping
+            x = selected_features.view(-1, self.feature_sizes[0], self.start_size, self.start_size)          
+        else:
+            # Skip connection is not provide then exploit a linear layer to map into the required self.num_elements 
+            # (More parameters)
+            x = self.fc_adjust(expanded_concepts)
+            x = x.view(-1, self.feature_sizes[0], self.start_size, self.start_size)
+                  
         for conv_transpose_layer in self.convs_transpose:
             x = conv_transpose_layer(x)
         x = self.final_layer(x)
@@ -181,28 +204,41 @@ class IndependentMLP(nn.Module):
 
     def forward(self, x):
         # c1 supervised, c2 unsuperv
-        c1, c2, _ = self.concept_encoder(x)
+        c1, c2, linear_weights, _ = self.concept_encoder(x)
         if c2 is not None:
             c = torch.cat((c1, c2), dim=1)
         else:
             c = c1
         y = self.predictor(c)
 
-        return c1, c2, y
-    
+        return c1, c2, y, linear_weights
+ #%%  
 class End2End(nn.Module):
-    def __init__(self,input_size, num_concepts, num_classes, num_embed_for_concept=8, num_model_concepts=0):
+    def __init__(self,input_size, num_concepts, num_classes, num_embed_for_concept=8, num_model_concepts=0, skip_connection = False):
 
         super(End2End, self).__init__()
         self.concept_encoder = Encoder(input_size, num_concepts, num_embed_for_concept, num_model_concepts)
+        self.skip_connection = skip_connection 
+        
+        # if self.skip_connection:
+        #     self.predictor = MLP(num_concepts + num_model_concepts + self.concept_encoder.fc_input_features, num_classes)
+        # else:
         self.predictor = MLP(num_concepts + num_model_concepts, num_classes)
-        self.concept_decoder = Decoder(input_size, num_concepts, num_model_concepts)
+            
+        self.concept_decoder = Decoder(input_size, num_concepts, num_model_concepts, num_embed_for_concept, skip_connection)
 
     def forward(self, x):
 
-        c1, c2, linear_weigths = self.concept_encoder(x)
-        # print(c1.size(), c2.size())
-        # Handling zero unsup concepts
+        c1, c2, linear_weigths, encod_flat = self.concept_encoder(x)
+        # print(c1.size(), c2.size(), encod_flat.size())
+        
+        # Handling zero unsup concepts and skip_connection (DO i want a skip connection on the MLP as well?)
+        # if self.skip_connection:
+        #     if c2 is not None:
+        #         c = torch.cat((c1, c2, encod_flat), dim=1)
+        #     else:
+        #         c = c1
+        # else:
         if c2 is not None:
             c = torch.cat((c1, c2), dim=1)
         else:
@@ -218,8 +254,13 @@ class End2End(nn.Module):
 
         y = self.predictor(c)
 
-        x_tilde = self.concept_decoder(c)
-        c_tilde, _, _ = self.concept_encoder(x_tilde)
+        # Decod will work differently based on this 
+        if self.skip_connection:
+            x_tilde = self.concept_decoder(c, encod_flat)
+        else:
+            x_tilde = self.concept_decoder(c)
+            
+        c_tilde, _, _, _ = self.concept_encoder(x_tilde)
 
         return c1, c2, y, x_tilde, c_tilde, linear_weigths
 
@@ -295,3 +336,5 @@ if __name__ == "__main__":
     
     #TODO: Calcolare MSE tra unsupervised concepts and the CONCEPTS previously taken out from the dsprite
     #TODO: Create new Yaml file for the experiments
+
+# %%
