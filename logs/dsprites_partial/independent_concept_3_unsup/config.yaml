@@ -1,0 +1,35 @@
+DATA:
+  data_dir: /home/lorenzo/generative-cem/data/dsprites/interim/full
+  dataset_name: dsprites
+  file_name: dsprites_leakage
+  file_type: npz
+  img_size: 64
+  n_channels: 1
+  n_classes: 2
+  n_concepts: 3
+  n_embed_concepts: 16
+  n_model_concepts: 3
+  selected_concepts:
+  - 1
+  - 3
+  - 5
+MODEL:
+  freeze_encoder: false
+REPORTS:
+  logs_dir: ./logs/
+  models_dir: ./models/
+  reports_dir: ./reports/
+TRAINING:
+  batch_size: 128
+  early_stopping: 10
+  learning_rate: 0.0001
+  num_epochs: 60
+  warmup_epochs: 5
+  weight_concept_loss: 1.0
+  weight_lat_loss: 0.0
+  weight_orth_loss: 0.0
+  weight_rec_loss: 0.0
+  weight_task_loss: 0.0
+device: cuda:1
+exp_name: independent_concept
+seed: 42

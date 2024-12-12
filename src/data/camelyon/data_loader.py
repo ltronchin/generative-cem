@@ -29,7 +29,7 @@ from torchvision.transforms import Compose, Lambda
 
 class CamelyonDataset(Dataset):
     """Custom Dataset for loading Camelyion image patches with labels and concepts."""
-    def __init__(self, subset, csv_file, split, root_dir, normalize=True, to_tensor=True, transform=None):
+    def __init__(self, subset, csv_file, root_dir, normalize=True, to_tensor=True, transform=None):
         """
         Args:
             subset (list): List of subset names to load.
@@ -44,8 +44,8 @@ class CamelyonDataset(Dataset):
         self.subset = subset
         self.df = pd.read_csv(csv_file)
         # Filter the data frame based on the split.
-        self.df = self.df[self.df['split'] == split]
-        self.df = self.df.reset_index(drop=True)
+        # self.df = self.df[self.df['split'] == split]
+        # self.df = self.df.reset_index(drop=True)
         self.root_dir = root_dir
         self.normalize = normalize
         self.to_tensor = to_tensor
@@ -91,6 +91,76 @@ class CamelyonDataset(Dataset):
         concepts = self.df.iloc[idx, 3:9].values.astype('float')
 
         return {'image': img, 'label': label, 'concepts': concepts}
+    
+class CamelyonDataset2(Dataset):
+    """Custom Dataset for loading Camelyon image patches with labels and concepts."""
+    def __init__(self, subset, csv_file, root_dir, normalize=True, to_tensor=True, transform=None, concept_to_keep=[]):
+        """
+        Args:
+            subset (list): List of subset names to load.
+            csv_file (string): Path to the csv file with annotations.
+            root_dir (string): Directory with all the image patches.
+            normalize (bool, optional): Whether to normalize the image patches.
+            to_tensor (bool, optional): Whether to convert the image patches to PyTorch tensors.
+            transform (callable, optional): Optional transform to be applied on a sample.
+            concept_to_keep (list, optional): List of positions of concepts to retain.
+        """
+        self.subset = subset
+        self.df = pd.read_csv(csv_file)
+        self.root_dir = root_dir
+        self.normalize = normalize
+        self.to_tensor = to_tensor
+        self.transform = transform
+        self.concept_to_keep = concept_to_keep
+
+        # Convert labels to numeric values if necessary
+        self.label_mapping = {label: idx for idx, label in enumerate(self.df['label'].unique())}
+
+        self.patches = self.load_patches()
+
+    def load_patches(self):
+        data = {}
+        for subset_name in self.subset:
+            patches_dir = os.path.join(self.root_dir, subset_name)
+            print(f"Loading patches from {patches_dir}")
+            if subset_name == 'pannuke':
+                patches_filename = os.path.join(patches_dir, 'patches_fix.hdf5')
+            else:
+                patches_filename = os.path.join(patches_dir, 'patches.hdf5')
+            patches = h5py.File(patches_filename, 'r')
+            data[subset_name] = patches
+
+        return data
+
+    def __len__(self):
+        return len(self.df)
+
+    def __getitem__(self, idx):
+        subset_name = self.df.iloc[idx, 0]
+        patches_list = self.df.iloc[idx, 1]
+        patch_id = self.df.iloc[idx, 2]
+
+        # Load the patch.
+        img = self.patches[subset_name][patches_list][patch_id]
+        if self.normalize:
+            img = img.astype(np.float32) / 255.0
+        if self.to_tensor:
+            img = torch.from_numpy(img).permute(2, 0, 1)
+        if self.transform:
+            img = self.transform(img)
+
+        label = self.label_mapping[self.df.iloc[idx, -3]]
+        concepts = self.df.iloc[idx, 3:9].values.astype('float')
+
+        if self.concept_to_keep:
+            c_to_keep = concepts[self.concept_to_keep]
+            c_excl = np.delete(concepts, self.concept_to_keep, axis=0)
+        else:
+            c_to_keep = concepts
+            c_excl = np.empty(0, dtype=np.float32)
+
+        return {'image': img, 'label': label, 'c_to_keep': c_to_keep, 'c_excl': c_excl}
+
 
 if __name__ == "__main__":
 
@@ -103,33 +173,52 @@ if __name__ == "__main__":
         'test_data2',
         'pannuke',
     ]
-    concepts_list = [
-        'nuclei_correlation',
-        'nuclei_contrast',
-        'ncount',
-        'narea',
-        'full_correlation',
-        'full_contrast',
+    concepts_list = [               # Std percentage with respect to mean
+        'nuclei_correlation',       # > 250%
+        'nuclei_contrast',          # > 600%
+        'ncount',                   # 35%  (low discriminat)
+        'narea',                    # > 100%
+        'full_correlation',         # 1.3% srd (Very low discriminative) 
+        'full_contrast',            # >50% 
     ]
 
+    os.chdir('/home/riccardo/Github/generative-cem')
     # Directories.
     interim_dir = os.path.join('data', dataset_name, 'interim')  # here find the concepts and data splits
     concept_dir = os.path.join(interim_dir, 'cmeasures')
-    raw_dir = os.path.join('data', dataset_name, 'raw')  # here find the patches
+    raw_dir = '/home/lorenzo/generative-cem/data/camelyon/raw' # here find the patches
     reports_dir = os.path.join('reports', dataset_name)
 
     # Initialize the dataset (example)
-    dataset_train = CamelyonDataset(subset=subset_name_list, csv_file=os.path.join(concept_dir, f'concepts_patients_splits.csv'), split='train', root_dir=raw_dir, normalize=True, to_tensor=True, transform=None)
+    dataset_train = CamelyonDataset(subset=subset_name_list, csv_file=os.path.join(concept_dir, f'df_train.csv'), root_dir=raw_dir, 
+                                    normalize=True, to_tensor=True, transform=None)
     #dataset_train = CamelyonDatasetEfficient(subset=subset_name_list, csv_file=os.path.join(concept_dir, f'concepts_patients_splits.csv'), split='train', root_dir=raw_dir, transform=None)
+    dataset_train = CamelyonDataset2(subset=subset_name_list, csv_file=os.path.join(concept_dir, f'df_train.csv'), root_dir=raw_dir,v 
+                                     normalize=True, to_tensor=True, transform=None, concept_to_keep=selected_conepts)
 
     # Initialize the data loader
     dataloader_train = torch.utils.data.DataLoader(dataset_train, batch_size=64, shuffle=True)
 
-    # Iterate over the data using tqdm
+    # Iterate over the data using tqdm and check mean std of concepts
+    accumulator = []
     for i, data in enumerate(tqdm(dataloader_train)):
         # Get the inputs
         x, y, c = data['image'], data['label'], data['concepts']
         if x.min() < 0 or x.max() > 1:
             raise ValueError("The image is not normalized.")
+        accumulator.append(c)
+        
+    # Concatenate all tensors in the accumulator along the batch dimension
+    accumulator = torch.cat(accumulator, dim=0)
+
+    # Calculate mean and standard deviation along the batch dimension (dim=0)
+    mean = accumulator.mean(dim=0)
+    std = accumulator.std(dim=0)
+
+    # Calculate standard deviation as a percentage of the mean
+    std_percentage = (std / mean) * 100
+
+    print("Mean:", mean)
+    print("Standard Deviation in Percentage:", std_percentage)
 
     print("May the force be with you!")

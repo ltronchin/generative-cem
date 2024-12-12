@@ -1,12 +1,10 @@
-"""
-Splits for Camelyon.
-"""
+#%%
+
 import copy
 import sys
 import os
-sys.path.extend([
-    "./",
-])
+sys.path.extend(["./",])
+sys.path.append('/home/riccardo/Github/generative-cem')
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -23,7 +21,7 @@ column_width_inches = column_width_pt * pt_to_inch
 aspect_ratio = 4 / 3
 sns.set(style="whitegrid", font_scale=1.6, rc={"figure.figsize": (column_width_inches, column_width_inches / aspect_ratio)})
 
-
+#%% 
 def extract_info(path, subset_name):
     """
     Extracts the patient_id, label, and center from the patch_path.
@@ -49,102 +47,106 @@ def extract_info(path, subset_name):
 
     return patient_id, label, center
 
-
-if __name__ == "__main__":
-
-    # Parameters.
-    dataset_name = 'camelyon'
-    subset_name_list = [
-        'cam16',
-        'all500',
-        'extra17',
-        'test_data2',
-        'pannuke',
-    ]
-    # Ignore tumor_extra17
-    concepts_list = [
-        'nuclei_correlation',
-        'nuclei_contrast',
-        'ncount',
-        'narea',
-        'full_correlation',
-        'full_contrast',
-    ]
-
-    # Directories.
-    interim_dir = os.path.join('data', dataset_name, 'interim') # here find the concepts and data splits
-    concept_dir = os.path.join(interim_dir, 'cmeasures')
-    reports_dir =  os.path.join('reports', dataset_name)
-
-    # Load the CSV file
-    df = pd.read_csv(os.path.join(concept_dir, f'concepts.csv'))
-
-    # Apply the extraction function to each row
-    df[['patient_id', 'label', 'center']] = df.apply(
-        lambda row: pd.Series(extract_info(row['patch_path'], row['subset_name'])),
-        axis=1
-    )
-        ################################################## RICCARDO ##################################################
-    
-    # Control, with respect to path: data\camelyon\interim\cmeasures\info\patients_label_counts.csv
-    for i in df['subset_name'].unique():
-        df_queried = df[df['subset_name'] == i]
-        counts = len(df_queried['patient_id'].unique())
-        print(i,': ', counts)
-    
-    # N patients:
-    # all500 :  34
-    # cam16 :  69
-    # extra17 :  78
-    # pannuke :  879
-    # test_data2 :  1
-    #%%
-    # Correcting pannuke patch idx
-    import re
-    df = df[df['subset_name'] == 'pannuke'] 
-    counter = 0
-    previous_number = 0    
-    less_image_sub_list = []
-
-    for idx, row in df.iterrows():
-        match = re.search(r"fold\d+/(\d+)/(normal|tumor)", row['patch_path'])
-        if match:
-            current_number = int(match.group(1))
-            if current_number == previous_number:
-                df.at[idx, 'patch_idx'] = counter
-                print(counter, idx, current_number)
-                counter += 1
-            # if different number (e.g. aptient), check if there are 5 images for him
-            else:
-                # check number of image per sub
-                if counter != 5:
-                    less_image_sub_list.append(match)
-                    print(75*'#',3*'\n', f'Less than 5 element in index {idx}',3*'\n', 75*'#')
-                # if we reached 5 images, update the number
-                else:
-                    print('New_sub')
-                # update sub and counter
-                previous_number = current_number
-                counter = 0
-                # write patch idx in the new sub
-                df.at[idx, 'patch_idx'] = counter
-                print(counter, idx, current_number)
-                counter += 1
-
-# founded: 137692, 138921, 139365, 140603,  141745, 141984, 142907, 144675
-
+# Parameters.
+dataset_name = 'camelyon'
+subset_name_list = [
+    'cam16',
+    'all500',
+    'extra17',
+    'test_data2',
+    'pannuke',
+]
+# Ignore tumor_extra17
+concepts_list = [
+    'nuclei_correlation',
+    'nuclei_contrast',
+    'ncount',
+    'narea',
+    'full_correlation',
+    'full_contrast',
+]
     #%% 
-    # Write new column to take track of the nodes
-    df['nodule'] = int(0)
-    pattern = r'node(\d+)'
-    import re
-    for idx, row in df[0:10].iterrows():
-        node = int(re.findall(pattern, df.at[idx, 'patch_path'])[0])
-        df.at[idx, 'nodule'] = node
-    
-    df['nodule'] = df['nodule'].astype('uint8') # less space
+    # Directories.
+    # Added for Riccado reading from Lorenzo's data
+# sys.path.extend(["/home/lorenzo/generative-cem/data"])
+# interim_dir = os.path.join('data', dataset_name, 'interim') # here find the concepts and data splits
+# concept_dir = os.path.join(interim_dir, 'cmeasures')
+# reports_dir =  os.path.join('reports', dataset_name)
+# Load the CSV file
+df = pd.read_csv('/home/lorenzo/generative-cem/data/camelyon/interim/cmeasures/concepts.csv')
 
+# Apply the extraction function to each row
+df[['patient_id', 'label', 'center']] = df.apply(
+    lambda row: pd.Series(extract_info(row['patch_path'], row['subset_name'])),
+    axis=1
+    )
+  #%%  ################################################## RICCARDO ##################################################
 
+# Control, with respect to path: data\camelyon\interim\cmeasures\info\patients_label_counts.csv
+for i in df['subset_name'].unique():
+    df_queried = df[df['subset_name'] == i]
+    counts = len(df_queried['patient_id'].unique())
+    print(i,': ', counts, f'DF length: {len(df_queried)}')
+
+# N patients:
+# all500 :      34     DF length: 24357
+# cam16 :       69     DF length: 18714
+# extra17 :     78     DF length: 94218
+# pannuke :     879    DF length: 7746
+# test_data2 :  1      DF length: 1000
+
+#%%
+# Correcting pannuke patch idx
+import re
+pannuke_indexes = df[df['subset_name'] == 'pannuke'].index
+counter = 0
+previous_number = 0    
+less_image_sub_list = []
+
+for idx in pannuke_indexes:
+    row = df.loc[idx]
+    match = re.search(r"fold\d+/(\d+)/(normal|tumor)", row['patch_path'])
+    if match:
+        current_number = int(match.group(1))
+        if current_number == previous_number:
+            df.at[idx, 'patch_idx'] = counter
+            print(counter, idx, current_number)
+            counter += 1
+        # if different number (e.g. patient), check if there are 5 images for him
+        else:
+            # check number of image per sub
+            if counter != 5:
+                less_image_sub_list.append(match)
+                print(75*'#',3*'\n', f'Less than 5 element in index {idx}',3*'\n', 75*'#')
+            # if we reached 5 images, update the number
+            else:
+                print('New_sub')
+            # update sub and counter
+            previous_number = current_number
+            counter = 0
+            # write patch idx in the new sub
+            df.at[idx, 'patch_idx'] = counter
+            # print(counter, idx, current_number)
+            counter += 1
+            
+print(less_image_sub_list)
+# TODO: What we do with those subjects?
+# founded idx: 137692, 138921, 139365, 140603,  141745, 141984, 142907, 144675
+
+#%% 
+# Write new column to take track of the nodes
+# df = pd.read_csv('/home/lorenzo/generative-cem/data/camelyon/interim/cmeasures/concepts_patients_2.csv')
+df['nodule'] = int(0)
+pattern = r'node(\d+)'
+import re
+for idx, row in df.iterrows():
+    node = re.findall(pattern, df.at[idx, 'patch_path'])
+    if node:        # Pannuke will be always None
+        df.at[idx, 'nodule'] = int(node[0])
+
+df['nodule'] = df['nodule'].astype('uint8') # less space
+
+#%%
 def train_val_test_split_df(dataframe, percentages=None, mode=None, manual_sel=None, seed=None):
     '''
     :param dataframe:     Dataframe to be split by
@@ -200,78 +202,21 @@ def train_val_test_split_df(dataframe, percentages=None, mode=None, manual_sel=N
             test_df = dataframe[dataframe[mode].isin(test_list)]
 
     if len(tr_df) + len(val_df) + len(test_df) != len(dataframe):
-        IndexError(
-            'Something went wrong when splitting dataframe! Some data are not part of either the train, val and test')
+        IndexError('Something went wrong when splitting dataframe! Some data are not part of either the train, val and test')
 
-    return tr_df, val_df, test_df
-    
-    # Create columns for split value
-    df['split'] = df['subset_name'].apply(lambda x: 'ex_test' if x == 'test_data2' else None)
+    return tr_df, val_df, test_df, tr_list, val_list, test_list
 
-    # Take out the 'test_data2" subset
-    idx = df[df['subset_name'] == 'test_data2'].index[0]
-    df_to_split = df.iloc[:idx]
-    # df_ex_test = df.iloc[idx:]
 
-    # First create a test set
-    df_tr_cross_val, _, df_test = train_val_test_split_df(dataframe=df_to_split, percentages=[0.9, 0.0, 0.1], mode='patient_id', seed=29)
-    # Now create train and val (isnert k-.fold here if necessary)
-    df_tr, df_val, _ = train_val_test_split_df(dataframe=df_tr_cross_val, percentages=[0.9, 0.1, 0.0], mode='patient_id', seed=29)
 
-    df.loc[df_tr.index, 'split'] = 'train'
-    df.loc[df_val.index, 'split'] = 'val'
-    df.loc[df_test.index, 'split'] = 'test'
+df_train, df_val, df_test, tr_list, val_list, test_list = train_val_test_split_df(dataframe = df, mode = 'patient_id', percentages = [0.8, 0.10, 0.10], seed=42)
+# Save to the disk.
+df.to_csv('/home/riccardo/Github/data/camelyon/interim/cmeasure/concepts.csv', index=False)
 
-    del df_tr_cross_val, df_to_split
-    
-################################################## RICCARDO ###################################################
+df_train.to_csv('/home/riccardo/Github/data/camelyon/interim/cmeasures/df_train.csv', index=False)
+df_val.to_csv('/home/riccardo/Github/data/camelyon/interim/cmeasures/df_val.csv', index=False)
+df_test.to_csv('/home/riccardo/Github/data/camelyon/interim/cmeasures/df_test.csv', index=False)
 
-    
-    # Save to the disk.
-    df.to_csv(os.path.join(concept_dir, 'concepts_patients.csv'), index=False)
-
-    # Check for NaN values
-    nan_counts = df.isna().sum()
-    print("Number of NaN values per column:")
-    print(nan_counts)
-
-    # Check for values equal to 'None'
-    none_counts = df.apply(lambda x: x == 'None').sum()
-    print("Number of 'None' values per column:")
-    print(none_counts)
-
-    # Group by the subset_name, center, and label.
-    slice_label_counts = df.groupby(['subset_name', 'center', 'label'])['patch_path'].count()
-    patients_label_counts = df.groupby(['subset_name', 'center', 'label'])['patient_id'].nunique()
-
-    slice_label_counts.to_csv(os.path.join(concept_dir, 'slice_label_counts.csv'))
-    patients_label_counts.to_csv(os.path.join(concept_dir, 'patients_label_counts.csv'))
-
-    # Now I want to label a ['train', 'val', 'test', 'ex_test'] splits.
-    # label all the patches of 'test_data2' as 'ex_test'
-    df['split'] = df['subset_name'].apply(lambda x: 'ex_test' if x == 'test_data2' else None)
-
-    # split ['all500', 'cam16', 'extra17', 'pannuke'] into 'train', 'val', 'test' stratifying to the centers and labels
-    df_strat = df[df['split'].isnull()].copy()
-    df_strat['strat'] = df_strat['center'] + '_' + df_strat['label']
-    train_val, test = train_test_split(df_strat, test_size=0.1, stratify=df_strat['strat'],  random_state=42, shuffle=True)
-    train, val = train_test_split(train_val, test_size=0.1, stratify=train_val['strat'], random_state=42, shuffle=True)
-
-    df.loc[train.index, 'split'] = 'train'
-    df.loc[val.index, 'split'] = 'val'
-    df.loc[test.index, 'split'] = 'test'
-
-    # Check the distribution of centers and label of the splits
-    split_counts = df.groupby('split')['center'].value_counts()
-    split_counts.to_csv(os.path.join(concept_dir, 'split_counts.csv'))
-    label_counts = df.groupby('split')['label'].value_counts()
-    label_counts.to_csv(os.path.join(concept_dir, 'label_counts.csv'))
-
-    # Create a df that show the distribution of the splits
-    split_label_counts = df.groupby(['split', 'center', 'label'])['patch_path'].count()
-    split_label_counts.to_csv(os.path.join(concept_dir, 'split_label_counts.csv'))
-
-    # Save to the disk.
-    df.to_csv(os.path.join(concept_dir, 'concepts_patients_splits.csv'), index=False)
-
-    print("May the force be with you!")
+np.savetxt('/home/riccardo/Github/data/camelyon/interim/cmeasures/subs_tr.csv', tr_list, fmt='%s', delimiter=',')
+np.savetxt('/home/riccardo/Github/data/camelyon/interim/cmeasures/subs_val.csv', val_list, fmt='%s', delimiter=',')
+np.savetxt('/home/riccardo/Github/data/camelyon/interim/cmeasures/subs_test.csv', test_list, fmt='%s', delimiter=',')
+# %%

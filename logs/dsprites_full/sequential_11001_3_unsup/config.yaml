@@ -1,0 +1,32 @@
+DATA:
+  data_dir: /home/lorenzo/generative-cem/data/dsprites/interim/full
+  dataset_name: dsprites_full
+  file_name: dsprites_leakage
+  file_type: npz
+  img_size: 64
+  n_channels: 1
+  n_classes: 2
+  n_concepts: 5
+  n_embed_concepts: 8
+  n_model_concepts: 3
+MODEL:
+  freeze_encoder: true
+  pretrained_model_path: ./models/dsprites_partial/oracle/model_best.pt
+REPORTS:
+  logs_dir: ./logs/
+  models_dir: ./models/
+  reports_dir: ./reports/
+TRAINING:
+  batch_size: 128
+  early_stopping: 10
+  learning_rate: 0.001
+  num_epochs: 20
+  warmup_epochs: 5
+  weight_concept_loss: 1.0
+  weight_lat_loss: 0.0
+  weight_orth_loss: 1.0
+  weight_rec_loss: 0.0
+  weight_task_loss: 1.0
+device: cuda:1
+exp_name: sequential_11001
+seed: 42
